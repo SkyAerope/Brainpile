@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Item, deleteItem } from '../api';
 import './ItemCard.css';
 import { ExternalLink, Image as ImageIcon, MoreHorizontal, Download, Trash2, Send } from 'lucide-react';
+import { ConfirmModal } from './ConfirmModal';
 
 interface Props {
   item: Item;
@@ -11,6 +12,7 @@ interface Props {
 
 export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   const [showMenu, setShowMenu] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const aspectRatio = item.width && item.height ? item.width / item.height : undefined;
 
@@ -26,12 +28,11 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showMenu]);
 
-  const handleDelete = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this item?')) return;
+  const handleDelete = async () => {
     try {
       await deleteItem(item.id);
       onDeleted?.(item.id);
+      setShowConfirm(false);
       setShowMenu(false);
     } catch (e) {
       alert('Failed to delete item');
@@ -40,6 +41,16 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   
   return (
     <div className={`item-card type-${item.type}`} onClick={() => onClick(item)}>
+      {showConfirm && (
+        <ConfirmModal 
+            title="Delete Item"
+            message="Are you sure you want to permanently delete this item? This action cannot be undone."
+            confirmLabel="Delete"
+            isDanger={true}
+            onConfirm={handleDelete}
+            onCancel={() => setShowConfirm(false)}
+        />
+      )}
       {item.type === 'text' ? (
         <div className="item-media-placeholder">
            <p className="text-title">{item.content}</p>
@@ -122,7 +133,10 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
                         <button 
                             className="dropdown-item delete" 
                             style={{ color: '#e60023' }}
-                            onClick={handleDelete}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowConfirm(true);
+                            }}
                         >
                             <Trash2 size={18} />
                             <span>Delete</span>

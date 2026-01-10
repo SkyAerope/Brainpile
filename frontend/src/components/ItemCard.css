@@ -55,11 +55,9 @@
   justify-content: space-between;
   padding: 12px;
   opacity: 0;
-  /* transition: opacity 0.3s ease; */
   pointer-events: none;
 }
 
-/* 移除之前显式的变暗，改用 overlay 的渐变 */
 .item-card:hover .item-media img {
   filter: none;
 }

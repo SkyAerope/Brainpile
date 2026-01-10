@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ItemDetail, fetchItemDetail, deleteItem } from '../api';
 import './ItemModal.css';
 import { X, Trash2, ExternalLink, Calendar, FileText, Image as ImageIcon, Download } from 'lucide-react';
+import { ConfirmModal } from './ConfirmModal';
 
 interface Props {
   itemId: number;
@@ -12,6 +13,7 @@ interface Props {
 export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     fetchItemDetail(itemId)
@@ -21,7 +23,6 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
   }, [itemId]);
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this item?')) return;
     try {
       await deleteItem(itemId);
       onDeleted(itemId);
@@ -36,6 +37,16 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
+      {showConfirm && (
+        <ConfirmModal 
+            title="Delete Item"
+            message="Are you sure you want to permanently delete this item? This action cannot be undone."
+            confirmLabel="Delete"
+            isDanger={true}
+            onConfirm={handleDelete}
+            onCancel={() => setShowConfirm(false)}
+        />
+      )}
       <div className="modal-content" onClick={e => e.stopPropagation()}>
         <button className="close-btn" onClick={onClose}><X size={24} /></button>
         
@@ -91,7 +102,7 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
                 </div>
 
                 <div className="modal-actions">
-                    <button className="btn btn-delete" onClick={handleDelete}>
+                    <button className="btn btn-delete" onClick={() => setShowConfirm(true)}>
                       <Trash2 size={16} /> Delete
                     </button>
                     <a href={`/api/v1/items/${detail.id}/raw`} target="_blank" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}>
