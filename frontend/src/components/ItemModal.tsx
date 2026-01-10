@@ -40,6 +40,7 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
         <button className="close-btn" onClick={onClose}><X size={24} /></button>
         
         <div className="modal-body">
+            {detail.type !== 'text' && (
             <div className="modal-left">
                  {/* Media Preview */}
                  {detail.s3_url && (
@@ -55,8 +56,9 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
                     </div>
                  )}
             </div>
+            )}
             
-            <div className="modal-right">
+            <div className="modal-right" style={detail.type === 'text' ? { borderLeft: 'none' } : undefined}>
                 <h2>{detail.type.toUpperCase()} Item</h2>
                 <div className="meta-row">
                     <div className="meta-item">
@@ -92,8 +94,8 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
                     <button className="btn btn-delete" onClick={handleDelete}>
                         <Trash2 size={16} /> Delete
                     </button>
-                    <a href={`/api/v1/items/${detail.id}/raw`} target="_blank" className="btn btn-secondary">
-                        Download Raw
+                    <a href={`/api/v1/items/${detail.id}/raw`} target="_blank" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+                      Download Raw
                     </a>
                 </div>
             </div>
