@@ -58,26 +58,75 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
         "content_text": content_text
     });
 
-    // 从 forward_origin 提取来源信息（Telegram Bot API 7.0+）
+    // 从 forward_origin 提取来源信息并保存到 entities 表
     let (source_chat_id, source_message_id, source_user_id) = match msg.forward_origin() {
-        Some(teloxide::types::MessageOrigin::Channel { chat, message_id, .. }) => {
-            tracing::info!("Forward from Channel: chat_id={}, msg_id={}", chat.id, message_id.0);
-            (Some(chat.id.0), Some(message_id.0 as i64), None)
-        }
-        // 群组转发（以群组身份发送的消息）
-        Some(teloxide::types::MessageOrigin::Chat { sender_chat, .. }) => {
-            tracing::info!("Forward from Chat: sender_chat_id={}", sender_chat.id);
-            (Some(sender_chat.id.0), None, None)
-        }
-        // 用户转发（私聊或群里个人消息）
-        Some(teloxide::types::MessageOrigin::User { sender_user, .. }) => {
-            tracing::info!("Forward from User: user_id={}", sender_user.id);
-            (None, None, Some(sender_user.id.0 as i64))
-        }
-        // 隐藏用户（隐私设置不允许显示转发来源）
-        Some(teloxide::types::MessageOrigin::HiddenUser { sender_user_name, .. }) => {
-            tracing::info!("Forward from HiddenUser: name={}", sender_user_name);
-            (None, None, None)
+        Some(origin) => {
+            let (eid, ename, eusername, etype) = match origin {
+                teloxide::types::MessageOrigin::User { sender_user, .. } => {
+                    let name = format!("{}{}", 
+                        sender_user.first_name, 
+                        sender_user.last_name.as_ref().map(|s| format!(" {}", s)).unwrap_or_default()
+                    );
+                    let type_str = if sender_user.is_bot { "bot" } else { "user" };
+                    (Some(sender_user.id.0 as i64), name, sender_user.username.clone(), type_str.to_string())
+                }
+                teloxide::types::MessageOrigin::Chat { sender_chat, .. } => {
+                    let name = sender_chat.title().unwrap_or("Unknown").to_string();
+                    let type_str = match &sender_chat.kind {
+                        teloxide::types::ChatKind::Public(p) => match p.kind {
+                            teloxide::types::PublicChatKind::Channel(_) => "channel",
+                            teloxide::types::PublicChatKind::Group => "group",
+                            teloxide::types::PublicChatKind::Supergroup(_) => "supergroup",
+                        },
+                        teloxide::types::ChatKind::Private(_) => "private",
+                    };
+                    (Some(sender_chat.id.0), name, sender_chat.username().map(|s| s.to_string()), type_str.to_string())
+                }
+                teloxide::types::MessageOrigin::Channel { chat, .. } => {
+                    (Some(chat.id.0), chat.title().map(|s| s.to_string()).unwrap_or_default(), chat.username().map(|s| s.to_string()), "channel".to_string())
+                }
+                teloxide::types::MessageOrigin::HiddenUser { .. } => (None, String::new(), None, String::new()),
+            };
+
+            if let Some(id) = eid {
+                tracing::info!("Upserting entity: id={}, name={}, username={:?}, type={}", id, ename, eusername, etype);
+                let _ = sqlx::query(
+                    r#"
+                    INSERT INTO entities (id, name, username, type, updated_at)
+                    VALUES ($1, $2, $3, $4, NOW())
+                    ON CONFLICT (id) DO UPDATE SET 
+                        name = EXCLUDED.name,
+                        username = EXCLUDED.username,
+                        type = EXCLUDED.type,
+                        updated_at = NOW()
+                    "#
+                )
+                .bind(id)
+                .bind(ename)
+                .bind(eusername)
+                .bind(etype)
+                .execute(&state.db)
+                .await;
+            }
+
+            match origin {
+                teloxide::types::MessageOrigin::Channel { chat, message_id, .. } => {
+                    tracing::info!("Forward from Channel: chat_id={}, msg_id={}", chat.id, message_id.0);
+                    (Some(chat.id.0), Some(message_id.0 as i64), None)
+                }
+                teloxide::types::MessageOrigin::Chat { sender_chat, .. } => {
+                    tracing::info!("Forward from Chat: sender_chat_id={}", sender_chat.id);
+                    (Some(sender_chat.id.0), None, None)
+                }
+                teloxide::types::MessageOrigin::User { sender_user, .. } => {
+                    tracing::info!("Forward from User: user_id={}", sender_user.id);
+                    (None, None, Some(sender_user.id.0 as i64))
+                }
+                teloxide::types::MessageOrigin::HiddenUser { sender_user_name, .. } => {
+                    tracing::info!("Forward from HiddenUser: name={}", sender_user_name);
+                    (None, None, None)
+                }
+            }
         }
         None => {
             tracing::info!("Not a forwarded message");
