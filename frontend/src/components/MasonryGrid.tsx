@@ -6,6 +6,7 @@ interface MasonryGridProps {
   items: Item[];
   columnCount?: number;
   onItemClick: (item: Item) => void;
+  onItemDelete?: (id: number) => void;
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
@@ -42,7 +43,7 @@ function estimateHeight(item: Item) {
   return score + 100;
 }
 
-export const MasonryGrid: React.FC<MasonryGridProps> = ({ items, onItemClick, loading, hasMore, onLoadMore }) => {
+export const MasonryGrid: React.FC<MasonryGridProps> = ({ items, onItemClick, onItemDelete, loading, hasMore, onLoadMore }) => {
   const windowWidth = useSyncExternalStore(
     (onStoreChange) => {
       window.addEventListener('resize', onStoreChange);
@@ -81,7 +82,11 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({ items, onItemClick, lo
           <div key={i} className="my-masonry-grid_column" style={{ flex: 1 }}>
             {colItems.map(item => (
               <div key={item.id} style={{ marginBottom: '16px' }}>
-                <ItemCard item={item} onClick={() => onItemClick(item)} />
+                <ItemCard 
+                    item={item} 
+                    onClick={() => onItemClick(item)} 
+                    onDeleted={onItemDelete}
+                />
               </div>
             ))}
           </div>

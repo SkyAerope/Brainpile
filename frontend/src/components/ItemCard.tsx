@@ -1,14 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Item } from '../api';
+import { Item, deleteItem } from '../api';
 import './ItemCard.css';
 import { ExternalLink, Image as ImageIcon, MoreHorizontal, Download, Trash2, Send } from 'lucide-react';
 
 interface Props {
   item: Item;
   onClick: (item: Item) => void;
+  onDeleted?: (id: number) => void;
 }
 
-export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
+export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const aspectRatio = item.width && item.height ? item.width / item.height : undefined;
@@ -24,6 +25,18 @@ export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showMenu]);
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this item?')) return;
+    try {
+      await deleteItem(item.id);
+      onDeleted?.(item.id);
+      setShowMenu(false);
+    } catch (e) {
+      alert('Failed to delete item');
+    }
+  };
   
   return (
     <div className={`item-card type-${item.type}`} onClick={() => onClick(item)}>
@@ -83,18 +96,34 @@ export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
                 {showMenu && (
                     <div className="dropdown-menu">
                         {item.source_url && (
-                          <button className="dropdown-item" onClick={() => window.open(item.source_url as string, '_blank')}>
+                          <button 
+                            className="dropdown-item" 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(item.source_url as string, '_blank');
+                                setShowMenu(false);
+                            }}
+                          >
                               <Send size={18} />
                               <span>Open in Telegram</span>
                           </button>
                         )}
-                        <button className="dropdown-item" onClick={() => {
-                            if (item.s3_url) window.open(item.s3_url, '_blank');
-                        }}>
+                        <button 
+                            className="dropdown-item" 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(`/api/v1/items/${item.id}/raw`, '_blank');
+                                setShowMenu(false);
+                            }}
+                        >
                             <Download size={18} />
                             <span>Download Raw</span>
                         </button>
-                        <button className="dropdown-item delete" style={{ color: '#e60023' }}>
+                        <button 
+                            className="dropdown-item delete" 
+                            style={{ color: '#e60023' }}
+                            onClick={handleDelete}
+                        >
                             <Trash2 size={18} />
                             <span>Delete</span>
                         </button>

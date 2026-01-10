@@ -106,6 +106,7 @@ export const EntitiesPage: React.FC = () => {
                         <MasonryGrid 
                             items={items} 
                             onItemClick={(item) => setSelectedItemId(item.id)} 
+                            onItemDelete={(id) => setItems(items.filter(it => it.id !== id))}
                             loading={loading}
                             hasMore={!!cursor}
                             onLoadMore={loadMore}
