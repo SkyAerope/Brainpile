@@ -164,9 +164,7 @@ body {
 
 /* Masonry Layout Adjustments */
 .my-masonry-grid {
-  display: flex;
-  margin-left: -16px;
-  width: auto;
+  width: 100%;
 }
 .my-masonry-grid_column {
   padding-left: 16px;

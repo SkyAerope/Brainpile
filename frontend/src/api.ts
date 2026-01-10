@@ -31,13 +31,18 @@ export interface ListResponse {
   next_cursor: number | null;
 }
 
-export async function fetchItems(cursor?: number | null, mode: 'timeline' | 'random' = 'timeline', entity_id?: string | null): Promise<ListResponse> {
+export async function fetchItems(
+  cursor?: number | null,
+  mode: 'timeline' | 'random' = 'timeline',
+  entity_id?: string | null,
+  signal?: AbortSignal
+): Promise<ListResponse> {
   const params = new URLSearchParams();
   if (cursor) params.append('cursor', cursor.toString());
   if (mode) params.append('mode', mode);
   if (entity_id) params.append('entity_id', entity_id);
   
-  const res = await fetch(`/api/v1/items?${params.toString()}`);
+  const res = await fetch(`/api/v1/items?${params.toString()}`, { signal });
   if (!res.ok) throw new Error('Failed to fetch items');
   return res.json();
 }
@@ -64,12 +69,12 @@ export interface SearchResponse {
   total: number;
 }
 
-export async function searchItems(query: string, type?: string): Promise<SearchResponse> {
+export async function searchItems(query: string, type?: string, signal?: AbortSignal): Promise<SearchResponse> {
   const params = new URLSearchParams();
   params.append('q', query);
   if (type) params.append('type', type);
   
-  const res = await fetch(`/api/v1/search?${params.toString()}`);
+  const res = await fetch(`/api/v1/search?${params.toString()}`, { signal });
   if (!res.ok) throw new Error('Failed to search items');
   return res.json();
 }

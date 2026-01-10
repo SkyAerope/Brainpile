@@ -24,8 +24,9 @@ export const RandomPage: React.FC = () => {
         <div className="container">
             <MasonryGrid 
                 items={items} 
+                layoutKey={'random'}
                 onItemClick={(item) => setSelectedItemId(item.id)} 
-                onItemDelete={(id) => setItems(items.filter(it => it.id !== id))}
+                onItemDelete={(id) => setItems((prev) => prev.filter((it) => it.id !== id))}
                 loading={loading}
                 hasMore={true}
                 onLoadMore={() => load()}

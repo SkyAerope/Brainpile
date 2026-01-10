@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchItems, searchItems, Item } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
@@ -13,27 +13,44 @@ export const TimelinePage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
 
+    const requestSeqRef = useRef(0);
+    const activeRequestRef = useRef<AbortController | null>(null);
+
     const load = async (reset = false) => {
         if (loading) return;
+        const requestSeq = (requestSeqRef.current += 1);
+        activeRequestRef.current?.abort();
+        const controller = new AbortController();
+        activeRequestRef.current = controller;
+
         setLoading(true);
         try {
             if (query) {
                 // Search mode
                 if (reset) {
-                    const data = await searchItems(query);
+                    const data = await searchItems(query, undefined, controller.signal);
+
+                    if (requestSeqRef.current !== requestSeq) return;
                     setItems(data.items);
                     setCursor(null);
                 }
             } else {
                 // Normal timeline
-                const data = await fetchItems(reset ? null : cursor, 'timeline');
+                const cursorSnapshot = reset ? null : cursor;
+                const data = await fetchItems(cursorSnapshot, 'timeline', undefined, controller.signal);
+
+                if (requestSeqRef.current !== requestSeq) return;
                 setItems(prev => reset ? data.items : [...prev, ...data.items]);
                 setCursor(data.next_cursor);
             }
         } catch (e) { 
-            console.error(e); 
+            if ((e as any)?.name !== 'AbortError') {
+                console.error(e);
+            }
         } finally { 
-            setLoading(false); 
+            if (requestSeqRef.current === requestSeq) {
+                setLoading(false);
+            }
         }
     };
 
@@ -50,8 +67,9 @@ export const TimelinePage: React.FC = () => {
             )}
             <MasonryGrid 
                 items={items} 
+                layoutKey={query ?? 'timeline'}
                 onItemClick={(item) => setSelectedItemId(item.id)} 
-                onItemDelete={(id) => setItems(items.filter(it => it.id !== id))}
+                onItemDelete={(id) => setItems((prev) => prev.filter((it) => it.id !== id))}
                 loading={loading}
                 hasMore={!query && !!cursor}
                 onLoadMore={() => load()}
@@ -61,7 +79,7 @@ export const TimelinePage: React.FC = () => {
                     itemId={selectedItemId} 
                     onClose={() => setSelectedItemId(null)}
                     onDeleted={(id) => {
-                        setItems(items.filter(it => it.id !== id));
+                        setItems((prev) => prev.filter((it) => it.id !== id));
                         setSelectedItemId(null);
                     }}
                 />
