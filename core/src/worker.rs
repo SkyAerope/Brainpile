@@ -6,6 +6,8 @@ use teloxide::types::{ReactionType, FileId};
 use s3::Bucket;
 use s3::creds::Credentials;
 use s3::region::Region;
+use std::panic::AssertUnwindSafe;
+use futures::FutureExt;
 
 pub async fn run_worker(state: AppState) {
     tracing::info!("Worker pipeline started.");
@@ -27,14 +29,24 @@ pub async fn run_worker(state: AppState) {
     ).expect("Failed to create S3 bucket").with_path_style();
 
     loop {
-        let processed = process_next_task(&state, &bucket).await;
-        match processed {
-            Ok(true) => continue,
-            Ok(false) => {
+        let result = AssertUnwindSafe(process_next_task(&state, &bucket)).catch_unwind().await;
+        
+        match result {
+            Ok(Ok(true)) => continue,
+            Ok(Ok(false)) => {
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             },
-            Err(e) => {
+            Ok(Err(e)) => {
                 tracing::error!("Worker error: {:?}", e);
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            },
+            Err(payload) => {
+                tracing::error!("Worker panicked! Task processing failed due to internal panic.");
+                if let Some(s) = payload.downcast_ref::<&str>() {
+                    tracing::error!("Panic payload: {}", s);
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    tracing::error!("Panic payload: {}", s);
+                }
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             }
         }
@@ -76,7 +88,19 @@ async fn process_next_task(state: &AppState, bucket: &Bucket) -> anyhow::Result<
     
     tracing::info!("Processing task #{}", task_id);
     
-    let result = perform_task(state, bucket, bot_chat_id, bot_message_id, payload).await;
+    let result = match AssertUnwindSafe(perform_task(state, bucket, bot_chat_id, bot_message_id, payload)).catch_unwind().await {
+        Ok(res) => res,
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                format!("Internal Panic: {}", s)
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                format!("Internal Panic: {}", s)
+            } else {
+                "Internal Panic: Unknown cause".to_string()
+            };
+            Err(anyhow::anyhow!(msg))
+        }
+    };
 
     let bot = Bot::new(&state.config.tg_bot_token);
     let chat_id = teloxide::types::ChatId(bot_chat_id);
@@ -225,7 +249,8 @@ async fn perform_task(state: &AppState, bucket: &Bucket, _chat_id: i64, _message
             {
                 let ocr_text = ocr_text.trim();
                 if !ocr_text.is_empty() && ocr_text != "空" {
-                    tracing::info!("OCR extracted: {}", &ocr_text[..ocr_text.len().min(100)]);
+                    let log_text: String = ocr_text.chars().take(50).collect();
+                    tracing::info!("OCR extracted: {}...", log_text);
                     // Append OCR text to searchable_text
                     if searchable_text.is_empty() {
                         searchable_text = ocr_text.to_string();
