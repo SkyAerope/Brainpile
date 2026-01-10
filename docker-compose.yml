@@ -1,0 +1,59 @@
+services:
+  brainpile-core:
+    build: ./core
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgres://brainpile:brainpile@postgres:5432/brainpile
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - CLIP_API_URL=http://brainpile-clip:8000
+      - VLM_API_BASE=${VLM_API_BASE}
+      - VLM_API_KEY=${VLM_API_KEY}
+      - VLM_MODEL=${VLM_MODEL}
+      - EMBEDDING_API_BASE=${EMBEDDING_API_BASE}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
+      - TG_BOT_TOKEN=${TG_BOT_TOKEN}
+      - RUST_LOG=info
+    depends_on:
+      - postgres
+      - minio
+      - brainpile-clip
+    restart: unless-stopped
+
+  brainpile-clip:
+    build: ./clip
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_USER=brainpile
+      - POSTGRES_PASSWORD=brainpile
+      - POSTGRES_DB=brainpile
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  minio_data:
