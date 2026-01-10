@@ -7,7 +7,9 @@ use s3::Bucket;
 use s3::creds::Credentials;
 use s3::region::Region;
 use std::panic::AssertUnwindSafe;
+use std::process::Stdio;
 use futures::FutureExt;
+use tokio::process::Command;
 
 pub async fn run_worker(state: AppState) {
     tracing::info!("Worker pipeline started.");
@@ -58,7 +60,7 @@ async fn process_next_task(state: &AppState, bucket: &Bucket) -> anyhow::Result<
     
     let row = sqlx::query(
         r#"
-        SELECT id, bot_chat_id, bot_message_id, payload 
+        SELECT id, bot_chat_id, bot_message_id, source_chat_id, source_message_id, source_user_id, payload 
         FROM tasks 
         WHERE status = 'pending' 
         ORDER BY created_at ASC 
@@ -69,11 +71,14 @@ async fn process_next_task(state: &AppState, bucket: &Bucket) -> anyhow::Result<
     .fetch_optional(&mut *tx)
     .await?;
 
-    let (task_id, bot_chat_id, bot_message_id, payload) = match row {
+    let (task_id, bot_chat_id, bot_message_id, source_chat_id, source_message_id, source_user_id, payload) = match row {
         Some(r) => (
              r.get::<i64, _>("id"),
              r.get::<i64, _>("bot_chat_id"),
              r.get::<i64, _>("bot_message_id"),
+             r.get::<Option<i64>, _>("source_chat_id"),
+             r.get::<Option<i64>, _>("source_message_id"),
+             r.get::<Option<i64>, _>("source_user_id"),
              r.get::<Option<serde_json::Value>, _>("payload").unwrap_or(serde_json::json!({}))
         ),
         None => return Ok(false),
@@ -88,7 +93,7 @@ async fn process_next_task(state: &AppState, bucket: &Bucket) -> anyhow::Result<
     
     tracing::info!("Processing task #{}", task_id);
     
-    let result = match AssertUnwindSafe(perform_task(state, bucket, bot_chat_id, bot_message_id, payload)).catch_unwind().await {
+    let result = match AssertUnwindSafe(perform_task(state, bucket, bot_chat_id, bot_message_id, source_chat_id, source_message_id, source_user_id, payload)).catch_unwind().await {
         Ok(res) => res,
         Err(payload) => {
             let msg = if let Some(s) = payload.downcast_ref::<&str>() {
@@ -187,14 +192,25 @@ async fn process_next_task(state: &AppState, bucket: &Bucket) -> anyhow::Result<
     Ok(true)
 }
 
-async fn perform_task(state: &AppState, bucket: &Bucket, _chat_id: i64, _message_id: i64, payload: serde_json::Value) -> anyhow::Result<i64> {
+async fn perform_task(
+    state: &AppState, 
+    bucket: &Bucket, 
+    _bot_chat_id: i64, 
+    _bot_message_id: i64, 
+    source_chat_id: Option<i64>,
+    source_message_id: Option<i64>,
+    source_user_id: Option<i64>,
+    payload: serde_json::Value
+) -> anyhow::Result<i64> {
     let bot = Bot::new(&state.config.tg_bot_token);
     let file_id = payload["file_id"].as_str();
     let item_type = payload["item_type"].as_str().unwrap_or("text");
     let content_text = payload["content_text"].as_str().unwrap_or("").to_string();
     
     let mut s3_key: Option<String> = None;
+    let mut thumbnail_key: Option<String> = None;
     let mut file_bytes: Vec<u8> = Vec::new();
+    let mut meta = serde_json::json!({});
 
     if let Some(fid) = file_id {
         if !fid.is_empty() {
@@ -208,6 +224,113 @@ async fn perform_task(state: &AppState, bucket: &Bucket, _chat_id: i64, _message
              
              bucket.put_object(&key, &file_bytes).await?;
              s3_key = Some(key);
+        }
+    }
+    
+    // 图片宽高提取（使用 image crate）
+    if item_type == "image" && !file_bytes.is_empty() {
+        if let Ok(img) = image::load_from_memory(&file_bytes) {
+            meta["width"] = serde_json::json!(img.width());
+            meta["height"] = serde_json::json!(img.height());
+            meta["file_size"] = serde_json::json!(file_bytes.len());
+            tracing::info!("Image dimensions: {}x{}", img.width(), img.height());
+        }
+    }
+    
+    // 视频处理：ffprobe 提取宽高/时长，ffmpeg 抽封面帧
+    let mut cover_frame_bytes: Vec<u8> = Vec::new();
+    if item_type == "video" && !file_bytes.is_empty() {
+        // 写入临时文件供 ffprobe/ffmpeg 处理
+        let temp_dir = tempfile::tempdir()?;
+        let video_path = temp_dir.path().join("video.mp4");
+        tokio::fs::write(&video_path, &file_bytes).await?;
+        
+        // ffprobe 提取元信息
+        let probe_output = Command::new("ffprobe")
+            .args([
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                "-show_streams",
+            ])
+            .arg(&video_path)
+            .output()
+            .await;
+        
+        if let Ok(output) = probe_output {
+            if output.status.success() {
+                if let Ok(probe_json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+                    // 从 streams 中找 video 流提取宽高
+                    if let Some(streams) = probe_json.get("streams").and_then(|s| s.as_array()) {
+                        for stream in streams {
+                            if stream.get("codec_type").and_then(|t| t.as_str()) == Some("video") {
+                                if let Some(w) = stream.get("width").and_then(|v| v.as_i64()) {
+                                    meta["width"] = serde_json::json!(w);
+                                }
+                                if let Some(h) = stream.get("height").and_then(|v| v.as_i64()) {
+                                    meta["height"] = serde_json::json!(h);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    // 从 format 中提取时长
+                    if let Some(duration_str) = probe_json.get("format")
+                        .and_then(|f| f.get("duration"))
+                        .and_then(|d| d.as_str())
+                    {
+                        if let Ok(duration) = duration_str.parse::<f64>() {
+                            meta["duration"] = serde_json::json!(duration);
+                        }
+                    }
+                    meta["file_size"] = serde_json::json!(file_bytes.len());
+                    tracing::info!("Video meta: {:?}", meta);
+                }
+            }
+        }
+        
+        // ffmpeg 提取封面帧（第1秒或第一帧）
+        let cover_path = temp_dir.path().join("cover.jpg");
+        let ffmpeg_result = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-i",
+            ])
+            .arg(&video_path)
+            .args([
+                "-ss", "00:00:01",
+                "-vframes", "1",
+                "-q:v", "2",
+            ])
+            .arg(&cover_path)
+            .stderr(Stdio::null())
+            .stdout(Stdio::null())
+            .status()
+            .await;
+        
+        // 如果 1s 位置失败，尝试第一帧
+        if ffmpeg_result.is_err() || !cover_path.exists() {
+            let _ = Command::new("ffmpeg")
+                .args(["-y", "-i"])
+                .arg(&video_path)
+                .args(["-vframes", "1", "-q:v", "2"])
+                .arg(&cover_path)
+                .stderr(Stdio::null())
+                .stdout(Stdio::null())
+                .status()
+                .await;
+        }
+        
+        if cover_path.exists() {
+            if let Ok(cover_data) = tokio::fs::read(&cover_path).await {
+                cover_frame_bytes = cover_data.clone();
+                // 上传封面到 S3
+                let thumb_key = format!("{}/{}_thumb.jpg", chrono::Utc::now().format("%Y/%m/%d"), uuid::Uuid::new_v4());
+                if bucket.put_object(&thumb_key, &cover_data).await.is_ok() {
+                    thumbnail_key = Some(thumb_key);
+                    tracing::info!("Video cover frame uploaded");
+                }
+            }
         }
     }
     
@@ -266,10 +389,18 @@ async fn perform_task(state: &AppState, bucket: &Bucket, _chat_id: i64, _message
         }
     }
 
-    // 2. Visual Embedding (CLIP) for images
-    if item_type == "image" && !file_bytes.is_empty() {
+    // 2. Visual Embedding (CLIP) for images and video cover frames
+    let visual_bytes = if item_type == "image" && !file_bytes.is_empty() {
+        Some(file_bytes.clone())
+    } else if item_type == "video" && !cover_frame_bytes.is_empty() {
+        Some(cover_frame_bytes.clone())
+    } else {
+        None
+    };
+    
+    if let Some(img_bytes) = visual_bytes {
         let clip_url = format!("{}/embed", state.config.clip_api_url);
-        let part = reqwest::multipart::Part::bytes(file_bytes.clone())
+        let part = reqwest::multipart::Part::bytes(img_bytes)
            .file_name("image.jpg")
            .mime_str("image/jpeg")?;
         let form = reqwest::multipart::Form::new().part("file", part);
@@ -279,6 +410,7 @@ async fn perform_task(state: &AppState, bucket: &Bucket, _chat_id: i64, _message
              if let Some(arr) = json.get("embedding").and_then(|v| v.as_array()) {
                  let vec: Vec<f32> = arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
                  visual_embedding_str = Some(format!("[{}]", vec.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",")));
+                 tracing::info!("Generated visual embedding for {}", item_type);
              }
         }
     }
@@ -333,18 +465,28 @@ async fn perform_task(state: &AppState, bucket: &Bucket, _chat_id: i64, _message
 
     let rec = sqlx::query(
         r#"
-        INSERT INTO items (item_type, content_hash, s3_key, content_text, searchable_text, text_embedding, visual_embedding)
-        VALUES ($1, $2, $3, $4, $5, $6::vector, $7::vector)
+        INSERT INTO items (
+            item_type, content_hash, s3_key, thumbnail_key, 
+            content_text, searchable_text, 
+            text_embedding, visual_embedding, 
+            meta, tg_chat_id, tg_message_id, tg_user_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8::vector, $9, $10, $11, $12)
         RETURNING id
         "#
     )
     .bind(item_type)
     .bind(content_hash)
     .bind(s3_key)
+    .bind(thumbnail_key)
     .bind(&content_text)
     .bind(&searchable_text)
     .bind(text_embedding_str)
     .bind(visual_embedding_str)
+    .bind(&meta)
+    .bind(source_chat_id)
+    .bind(source_message_id)
+    .bind(source_user_id)
     .fetch_one(&state.db)
     .await?;
 

@@ -59,3 +59,27 @@ async def embed_image(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Error processing image: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/embed_text")
+async def embed_text(text: str):
+    """
+    文本转视觉向量（用于文本搜图）。
+    使用 CLIP 的 text encoder 生成与图片空间对齐的 768 维向量。
+    """
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not initialized")
+    
+    try:
+        # 使用 cn_clip 的 tokenize 处理中文文本
+        text_input = clip.tokenize([text]).to(DEVICE)
+        
+        with torch.no_grad():
+            text_features = model.encode_text(text_input)
+            text_features /= text_features.norm(dim=-1, keepdim=True)
+        
+        embedding = text_features.squeeze().tolist()
+        return {"embedding": embedding}
+    except Exception as e:
+        logger.error(f"Error processing text: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

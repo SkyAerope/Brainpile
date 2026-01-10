@@ -17,8 +17,7 @@
 .item-media {
   position: relative;
   width: 100%;
-  aspect-ratio: 16/9; 
-  /* For masonry we might want natural height, but for grid, fixed aspect or contain is easier */
+  /* Removed fixed aspect-ratio to allow inline style to control it or natural height */
   background: #f4f4f5;
   overflow: hidden;
 }

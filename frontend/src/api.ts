@@ -3,6 +3,7 @@ export interface Item {
   type: string;
   content: string | null;
   s3_url: string | null;
+  thumbnail_url?: string | null;
   created_at: string | null;
   width?: number;
   height?: number;
@@ -40,4 +41,19 @@ export async function fetchItemDetail(id: number): Promise<ItemDetail> {
 export async function deleteItem(id: number): Promise<void> {
   const res = await fetch(`/api/v1/items/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete item');
+}
+
+export interface SearchResponse {
+  items: Item[];
+  total: number;
+}
+
+export async function searchItems(query: string, type?: string): Promise<SearchResponse> {
+  const params = new URLSearchParams();
+  params.append('q', query);
+  if (type) params.append('type', type);
+  
+  const res = await fetch(`/api/v1/search?${params.toString()}`);
+  if (!res.ok) throw new Error('Failed to search items');
+  return res.json();
 }

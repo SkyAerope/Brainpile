@@ -42,12 +42,16 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
         <div className="modal-body">
             <div className="modal-left">
                  {/* Media Preview */}
-                 {detail.s3_url && (detail.type === 'image' || detail.type === 'video') ? (
-                    <img src={detail.s3_url} alt="Full content" className="modal-image" />
-                 ) : (
+                 {detail.s3_url && (
+                    detail.type === 'video' ? (
+                        <video controls src={detail.s3_url} className="modal-media" />
+                    ) : (detail.type === 'image' ? (
+                        <img src={detail.s3_url} alt="Full content" className="modal-media" />
+                    ) : null)
+                 ) || (
                     <div className="modal-placeholder">
                          {detail.type === 'text' ? <FileText size={64} /> : <ImageIcon size={64} />}
-                         <p>No Image Preview</p>
+                         <p>No Media Preview</p>
                     </div>
                  )}
             </div>

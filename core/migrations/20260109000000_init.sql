@@ -17,6 +17,7 @@ CREATE TABLE items (
     
     tg_message_id BIGINT,
     tg_chat_id BIGINT,
+    tg_user_id BIGINT,
     tg_group_id BIGINT,
     
     item_type VARCHAR(20) NOT NULL,
@@ -56,6 +57,7 @@ CREATE TABLE tasks (
     
     source_chat_id BIGINT,
     source_message_id BIGINT,
+    source_user_id BIGINT,
     
     payload JSONB DEFAULT '{}',
     

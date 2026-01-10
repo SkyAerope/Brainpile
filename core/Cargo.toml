@@ -23,3 +23,4 @@ rust-s3 = { version = "0.36", default-features = false, features = ["tokio-nativ
 md5 = "0.7"
 tempfile = "3.10"
 base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }

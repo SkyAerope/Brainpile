@@ -7,7 +7,7 @@ RUN cargo build --release
 
 FROM debian:bookworm-slim
 WORKDIR /app
-# Install OpenSSL which is required for many Rust networking crates
-RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install OpenSSL (required for Rust networking crates) and ffmpeg (for video processing)
+RUN apt-get update && apt-get install -y libssl-dev ca-certificates ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/brainpile-core .
 CMD ["./brainpile-core"]

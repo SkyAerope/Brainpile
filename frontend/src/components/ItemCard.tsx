@@ -9,12 +9,21 @@ interface Props {
 }
 
 export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
+  const aspectRatio = item.width && item.height ? item.width / item.height : undefined;
+  
   return (
     <div className="item-card" onClick={() => onClick(item)}>
       {item.type !== 'text' && (
-        <div className="item-media">
+        <div 
+            className="item-media" 
+            style={aspectRatio ? { aspectRatio: `${aspectRatio}` } : undefined}
+        >
           {item.s3_url && (item.type === 'image' || item.type === 'video') ? (
-            <img src={item.s3_url} alt="content" loading="lazy" />
+            <img 
+                src={item.type === 'video' ? item.thumbnail_url || item.s3_url : item.s3_url} 
+                alt="content" 
+                loading="lazy" 
+            />
           ) : (
             <div className="placeholder">
               <ImageIcon size={48} />

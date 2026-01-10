@@ -39,6 +39,18 @@ body {
   font-weight: 700;
 }
 
+/* Masonry Layout */
+.my-masonry-grid {
+  display: flex;
+  margin-left: -20px; /* gutter size offset */
+  width: auto;
+}
+.my-masonry-grid_column {
+  padding-left: 20px; /* gutter size */
+  background-clip: padding-box;
+}
+
+/* Fallback / Other Grids */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

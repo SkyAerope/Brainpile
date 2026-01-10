@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use crate::db::{search_text_vec, search_visual_vec, search_fts, rrf_merge, fetch_items_by_ids};
 use s3::{Bucket, creds::Credentials, region::Region};
 use axum::{
     extract::{Path, Query, State},
@@ -16,6 +17,7 @@ pub async fn run_server(state: AppState) {
         .route("/api/v1/items", get(list_items))
         .route("/api/v1/items/:id", get(get_item).delete(delete_item))
         .route("/api/v1/items/:id/raw", get(get_raw_item))
+        .route("/api/v1/search", get(search_items))
         .with_state(state);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 8080));
@@ -42,7 +44,7 @@ async fn list_items(
         // 随机模式
         sqlx::query(
             r#"
-            SELECT id, item_type, content_text, s3_key, created_at, meta
+            SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta
             FROM items
             ORDER BY RANDOM()
             LIMIT $1
@@ -58,7 +60,7 @@ async fn list_items(
             Some(cursor) => {
                 sqlx::query(
                     r#"
-                    SELECT id, item_type, content_text, s3_key, created_at, meta
+                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta
                     FROM items
                     WHERE id < $1
                     ORDER BY id DESC
@@ -74,7 +76,7 @@ async fn list_items(
             None => {
                 sqlx::query(
                     r#"
-                    SELECT id, item_type, content_text, s3_key, created_at, meta
+                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta
                     FROM items
                     ORDER BY id DESC
                     LIMIT $1
@@ -95,10 +97,17 @@ async fn list_items(
         let item_type: String = row.get("item_type");
         let content_text: Option<String> = row.get("content_text");
         let s3_key: Option<String> = row.get("s3_key");
+        let thumbnail_key: Option<String> = row.try_get("thumbnail_key").ok();
         let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
         let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
 
         let s3_url = if let Some(key) = s3_key.as_ref() {
+             state.s3_signing_client.presign_get(key, 3600, None).await.ok()
+        } else {
+             None
+        };
+
+        let thumbnail_url = if let Some(key) = thumbnail_key.as_ref() {
              state.s3_signing_client.presign_get(key, 3600, None).await.ok()
         } else {
              None
@@ -109,6 +118,7 @@ async fn list_items(
             "type": item_type,
             "content": content_text,
             "s3_url": s3_url,
+            "thumbnail_url": thumbnail_url,
             "created_at": created_at,
             "width": meta.get("width"),
             "height": meta.get("height"),
@@ -168,9 +178,18 @@ async fn get_item(
 
             // 构建 TG 跳转链接
             let tg_link = match (tg_chat_id, tg_message_id) {
-                (Some(chat_id), Some(msg_id)) => {
-                    // 私聊或群组链接格式
+                // 频道/超级群组消息：https://t.me/c/ID/MSG_ID
+                // ID 需要去掉 -100 前缀。例如 -1001234567890 -> 1234567890
+                (Some(chat_id), Some(msg_id)) if chat_id <= -1000000000000 => {
                     Some(format!("https://t.me/c/{}/{}", (-chat_id - 1000000000000_i64), msg_id))
+                }
+                // 个人用户：tg://user?id=ID
+                (Some(chat_id), _) if chat_id > 0 => {
+                     Some(format!("tg://user?id={}", chat_id))
+                }
+                // 频道/超级群组（无具体消息）：https://t.me/c/ID
+                (Some(chat_id), None) if chat_id <= -1000000000000 => {
+                     Some(format!("https://t.me/c/{}", (-chat_id - 1000000000000_i64)))
                 }
                 _ => None
             };
@@ -300,4 +319,212 @@ async fn get_raw_item(
     }
 
     axum::http::StatusCode::NOT_FOUND.into_response()
+}
+
+// ============ Search API ============
+
+#[derive(Deserialize)]
+struct SearchParams {
+    q: Option<String>,           // 文本搜索词
+    image_url: Option<String>,   // 以图搜图的图片 URL
+    #[serde(rename = "type")]
+    item_type: Option<String>,   // 类型过滤
+    limit: Option<i64>,          // 返回数量
+}
+
+/// 混合检索 API
+/// - q: 文本搜索（走 text_embedding + visual_embedding(text) + FTS）
+/// - image_url: 以图搜图（走 visual_embedding KNN）
+async fn search_items(
+    State(state): State<AppState>,
+    Query(params): Query<SearchParams>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let limit = params.limit.unwrap_or(50).min(100);
+    let per_channel = 100_i64;  // 每路召回数
+    let rrf_k = 60.0;           // RRF 平滑常数
+    
+    // 至少需要 q 或 image_url 之一
+    if params.q.is_none() && params.image_url.is_none() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    
+    let mut channels: Vec<Vec<crate::db::SearchHit>> = Vec::new();
+    
+    // 文本搜索模式
+    if let Some(ref query_text) = params.q {
+        // 1. 获取文本向量（BGE-M3）用于 text_embedding 召回
+        if let Some(text_vec) = get_text_embedding(&state, query_text).await {
+            if let Ok(hits) = search_text_vec(&state.db, &text_vec, per_channel).await {
+                tracing::info!("text_vec recall: {} hits", hits.len());
+                channels.push(hits);
+            }
+        }
+        
+        // 2. 获取文本的视觉向量（CLIP text embedding）用于 visual_embedding 召回
+        if let Some(visual_vec) = get_clip_text_embedding(&state, query_text).await {
+            if let Ok(hits) = search_visual_vec(&state.db, &visual_vec, per_channel).await {
+                tracing::info!("visual_vec (text) recall: {} hits", hits.len());
+                channels.push(hits);
+            }
+        }
+        
+        // 3. 全文检索召回
+        if let Ok(hits) = search_fts(&state.db, query_text, per_channel).await {
+            tracing::info!("fts recall: {} hits", hits.len());
+            channels.push(hits);
+        }
+    }
+    
+    // 以图搜图模式
+    if let Some(ref image_url) = params.image_url {
+        // 下载图片并获取 CLIP 视觉向量
+        if let Some(visual_vec) = get_clip_image_embedding_from_url(&state, image_url).await {
+            if let Ok(hits) = search_visual_vec(&state.db, &visual_vec, per_channel).await {
+                tracing::info!("visual_vec (image) recall: {} hits", hits.len());
+                channels.push(hits);
+            }
+        }
+    }
+    
+    if channels.is_empty() {
+        return Ok(Json(json!({ "items": [], "total": 0 })));
+    }
+    
+    // RRF 融合
+    let merged_ids = rrf_merge(channels, rrf_k, limit as usize);
+    tracing::info!("RRF merged: {} items", merged_ids.len());
+    
+    // 批量获取详情
+    let rows = fetch_items_by_ids(&state.db, &merged_ids)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch items: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    
+    let mut items = Vec::new();
+    for row in &rows {
+        let id: i64 = row.get("id");
+        let item_type: String = row.get("item_type");
+        
+        // 类型过滤
+        if let Some(ref filter_type) = params.item_type {
+            if &item_type != filter_type {
+                continue;
+            }
+        }
+        
+        let content_text: Option<String> = row.get("content_text");
+        let s3_key: Option<String> = row.get("s3_key");
+        let thumbnail_key: Option<String> = row.get("thumbnail_key");
+        let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
+        let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
+
+        let s3_url = if let Some(key) = s3_key.as_ref() {
+            state.s3_signing_client.presign_get(key, 3600, None).await.ok()
+        } else {
+            None
+        };
+        
+        let thumbnail_url = if let Some(key) = thumbnail_key.as_ref() {
+            state.s3_signing_client.presign_get(key, 3600, None).await.ok()
+        } else {
+            None
+        };
+
+        items.push(json!({
+            "id": id,
+            "type": item_type,
+            "content": content_text,
+            "s3_url": s3_url,
+            "thumbnail_url": thumbnail_url,
+            "created_at": created_at,
+            "width": meta.get("width"),
+            "height": meta.get("height"),
+        }));
+    }
+
+    Ok(Json(json!({
+        "items": items,
+        "total": items.len()
+    })))
+}
+
+/// 获取文本的 BGE-M3 向量（用于 text_embedding 召回）
+async fn get_text_embedding(state: &AppState, text: &str) -> Option<Vec<f32>> {
+    let embedding_url = format!("{}/embeddings", state.config.embedding_api_base);
+    let body = serde_json::json!({
+        "model": state.config.embedding_model,
+        "input": text
+    });
+    
+    let res = state.http_client
+        .post(&embedding_url)
+        .header("Authorization", format!("Bearer {}", state.config.embedding_api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+    
+    if !res.status().is_success() {
+        return None;
+    }
+    
+    let json: serde_json::Value = res.json().await.ok()?;
+    let arr = json.get("data")?.get(0)?.get("embedding")?.as_array()?;
+    
+    Some(arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
+}
+
+/// 获取文本的 CLIP 视觉向量（用于文本搜图）
+async fn get_clip_text_embedding(state: &AppState, text: &str) -> Option<Vec<f32>> {
+    let clip_url = format!("{}/embed_text", state.config.clip_api_url);
+    
+    let res = state.http_client
+        .post(&clip_url)
+        .query(&[("text", text)])
+        .send()
+        .await
+        .ok()?;
+    
+    if !res.status().is_success() {
+        tracing::warn!("CLIP text embedding failed: {}", res.status());
+        return None;
+    }
+    
+    let json: serde_json::Value = res.json().await.ok()?;
+    let arr = json.get("embedding")?.as_array()?;
+    
+    Some(arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
+}
+
+/// 从 URL 下载图片并获取 CLIP 视觉向量（用于以图搜图）
+async fn get_clip_image_embedding_from_url(state: &AppState, image_url: &str) -> Option<Vec<f32>> {
+    // 下载图片
+    let res = state.http_client.get(image_url).send().await.ok()?;
+    if !res.status().is_success() {
+        tracing::warn!("Failed to download image from {}", image_url);
+        return None;
+    }
+    let image_bytes = res.bytes().await.ok()?;
+    
+    // 调用 CLIP embed
+    let clip_url = format!("{}/embed", state.config.clip_api_url);
+    let part = reqwest::multipart::Part::bytes(image_bytes.to_vec())
+        .file_name("image.jpg")
+        .mime_str("image/jpeg")
+        .ok()?;
+    let form = reqwest::multipart::Form::new().part("file", part);
+    
+    let res = state.http_client.post(&clip_url).multipart(form).send().await.ok()?;
+    if !res.status().is_success() {
+        tracing::warn!("CLIP image embedding failed: {}", res.status());
+        return None;
+    }
+    
+    let json: serde_json::Value = res.json().await.ok()?;
+    let arr = json.get("embedding")?.as_array()?;
+    
+    Some(arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
 }
