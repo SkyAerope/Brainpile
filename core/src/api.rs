@@ -122,6 +122,7 @@ async fn list_items(
             "created_at": created_at,
             "width": meta.get("width"),
             "height": meta.get("height"),
+            "source_url": meta.get("source_url"),
         }));
     }
 

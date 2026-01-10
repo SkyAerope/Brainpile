@@ -7,6 +7,7 @@ export interface Item {
   created_at: string | null;
   width?: number;
   height?: number;
+  source_url?: string | null;
 }
 
 export interface ItemDetail extends Item {

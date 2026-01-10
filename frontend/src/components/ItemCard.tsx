@@ -1,7 +1,7 @@
 import React from 'react';
 import { Item } from '../api';
 import './ItemCard.css';
-import { Maximize2, Image as ImageIcon } from 'lucide-react';
+import { ExternalLink, Image as ImageIcon } from 'lucide-react';
 
 interface Props {
   item: Item;
@@ -12,7 +12,7 @@ export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
   const aspectRatio = item.width && item.height ? item.width / item.height : undefined;
   
   return (
-    <div className="item-card" onClick={() => onClick(item)}>
+    <div className={`item-card type-${item.type}`} onClick={() => onClick(item)}>
       {item.type !== 'text' && (
         <div 
             className="item-media" 
@@ -20,7 +20,7 @@ export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
         >
           {item.s3_url && (item.type === 'image' || item.type === 'video') ? (
             <img 
-                src={item.type === 'video' ? item.thumbnail_url || item.s3_url : item.s3_url} 
+                src={item.thumbnail_url || item.s3_url} 
                 alt="content" 
                 loading="lazy" 
             />
@@ -30,16 +30,30 @@ export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
             </div>
           )}
           <div className="overlay">
-            <Maximize2 className="icon" size={24} />
+            <button className="view-btn">
+                View
+            </button>
+            {item.source_url && (
+                <a 
+                    href={item.source_url} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    className="source-link" 
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <ExternalLink size={14} />
+                    <span>Source</span>
+                </a>
+            )}
           </div>
         </div>
       )}
       <div className="item-content">
+        {item.content && <p className="text-title">{item.content}</p>}
         <div className="item-meta">
             <span className="type-badge">{item.type}</span>
-            <span className="date">{item.created_at ? new Date(item.created_at).toLocaleDateString() : 'Unknown'}</span>
+            <span className="date">{item.created_at ? new Date(item.created_at).toLocaleDateString() : ''}</span>
         </div>
-        {item.content && <p className="text-preview">{item.content}</p>}
       </div>
     </div>
   );
