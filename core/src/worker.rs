@@ -210,7 +210,8 @@ async fn perform_task(
     let mut s3_key: Option<String> = None;
     let mut thumbnail_key: Option<String> = None;
     let mut file_bytes: Vec<u8> = Vec::new();
-    let mut meta = serde_json::json!({});
+    // 从 payload 中继承 meta 信息（如 forward_sender_name）
+    let mut meta = payload.get("meta").cloned().unwrap_or_else(|| serde_json::json!({}));
 
     if let Some(fid) = file_id {
         if !fid.is_empty() {

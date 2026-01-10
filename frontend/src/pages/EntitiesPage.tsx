@@ -76,7 +76,9 @@ export const EntitiesPage: React.FC = () => {
                             onClick={() => loadEntityItems(entity.id)}
                         >
                             <div className="entity-avatar">
-                                {entity.avatar_url ? (
+                                {entity.id === '0' ? (
+                                    <div className="avatar-placeholder" style={{ background: '#f0f0f0' }}>?</div>
+                                ) : entity.avatar_url ? (
                                     <img src={entity.avatar_url} alt={entity.name} />
                                 ) : (
                                     <div className="avatar-placeholder">{entity.name[0]}</div>
@@ -84,7 +86,10 @@ export const EntitiesPage: React.FC = () => {
                             </div>
                             <div className="entity-info">
                                 <div className="entity-name">{entity.name}</div>
-                                <div className="entity-meta">@{entity.username || entity.type}</div>
+                                <div className="entity-meta">
+                                    {entity.id === '0' ? 'Forwards from hidden profiles' :
+                                     `@${entity.username || entity.type}`}
+                                </div>
                             </div>
                         </div>
                     ))}

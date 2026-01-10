@@ -27,6 +27,57 @@ pub async fn run_bot(state: AppState) {
         .await;
 }
 
+async fn update_entity_avatar(bot: Bot, state: AppState, id: i64, name: String) {
+    // 检查是否需要更新头像（简单起见，如果 NULL 则更新，或者定期更新）
+    let needs_update: bool = sqlx::query_scalar("SELECT avatar_url IS NULL FROM entities WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(Some(true))
+        .unwrap_or(true);
+    
+    if !needs_update {
+        return;
+    }
+
+    if let Ok(chat) = bot.get_chat(ChatId(id)).await {
+        if let Some(photo) = chat.photo {
+            if let Ok(file) = bot.get_file(photo.small_file_id).await {
+                let mut dst = Vec::new();
+                if bot.download_file(&file.path, &mut dst).await.is_ok() {
+                    let ext = file.path.split('.').last().unwrap_or("jpg");
+                    let key = format!("avatars/{}.{}", id, ext);
+                    
+                    let region = Region::Custom {
+                        region: "us-east-1".to_owned(),
+                        endpoint: state.config.s3_endpoint.clone(),
+                    };
+                    let credentials = Credentials::new(
+                        Some(&state.config.s3_access_key),
+                        Some(&state.config.s3_secret_key),
+                        None, None, None
+                    ).ok();
+                    
+                    if let (Some(creds), Some(bucket_name)) = (credentials, Some(&state.config.s3_bucket)) {
+                        let bucket = Bucket::new(bucket_name, region, creds).ok().map(|b| b.with_path_style());
+                        if let Some(bucket) = bucket {
+                            if bucket.put_object(&key, &dst).await.is_ok() {
+                                let avatar_url = format!("PROXY:{}", key); 
+                                let _ = sqlx::query("UPDATE entities SET avatar_url = $1 WHERE id = $2")
+                                    .bind(avatar_url)
+                                    .bind(id)
+                                    .execute(&state.db)
+                                    .await;
+                                tracing::info!("Updated avatar for entity {}: {}", id, name);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseResult<()> {
     tracing::info!("Received message: {} from chat {}", msg.id, msg.chat.id);
 
@@ -54,56 +105,7 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
             };
 
             if let Some(id) = eid {
-                // 检查是否需要更新头像（简单起见，如果 NULL 则更新，或者定期更新）
-                let needs_update: bool = sqlx::query_scalar("SELECT avatar_url IS NULL FROM entities WHERE id = $1")
-                    .bind(id)
-                    .fetch_optional(&state_clone.db)
-                    .await
-                    .unwrap_or(Some(true))
-                    .unwrap_or(true);
-                
-                if needs_update {
-                    if let Ok(chat) = bot_clone.get_chat(ChatId(id)).await {
-                        if let Some(photo) = chat.photo {
-                            if let Ok(file) = bot_clone.get_file(photo.small_file_id).await {
-                                let mut dst = Vec::new();
-                                if bot_clone.download_file(&file.path, &mut dst).await.is_ok() {
-                                    let ext = file.path.split('.').last().unwrap_or("jpg");
-                                    let key = format!("avatars/{}.{}", id, ext);
-                                    
-                                    // 复用 worker 中的 S3 逻辑（这里简单处理）
-                                    let region = Region::Custom {
-                                        region: "us-east-1".to_owned(),
-                                        endpoint: state_clone.config.s3_endpoint.clone(),
-                                    };
-                                    let credentials = Credentials::new(
-                                        Some(&state_clone.config.s3_access_key),
-                                        Some(&state_clone.config.s3_secret_key),
-                                        None, None, None
-                                    ).ok();
-                                    
-                                    if let (Some(creds), Some(bucket_name)) = (credentials, Some(&state_clone.config.s3_bucket)) {
-                                        let bucket = Bucket::new(bucket_name, region, creds).ok().map(|b| b.with_path_style());
-                                        if let Some(bucket) = bucket {
-                                            if bucket.put_object(&key, &dst).await.is_ok() {
-                                                // 获取签名 URL 并存入 DB
-                                                // 签名 URL 有效期限制，更好的做法是存 key，在 api 层面动态签名
-                                                // 这里为了简单先存 key
-                                                let avatar_url = format!("PROXY:{}", key); 
-                                                let _ = sqlx::query("UPDATE entities SET avatar_url = $1 WHERE id = $2")
-                                                    .bind(avatar_url)
-                                                    .bind(id)
-                                                    .execute(&state_clone.db)
-                                                    .await;
-                                                tracing::info!("Updated avatar for entity {}: {}", id, ename);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                update_entity_avatar(bot_clone, state_clone, id, ename).await;
             }
         });
     }
@@ -124,10 +126,11 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
         return Ok(());
     };
 
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "file_id": file_id,
         "item_type": item_type,
-        "content_text": content_text
+        "content_text": content_text,
+        "meta": {}
     });
 
     // 从 forward_origin 提取来源信息并保存到 entities 表
@@ -157,7 +160,10 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
                 teloxide::types::MessageOrigin::Channel { chat, .. } => {
                     (Some(chat.id.0), chat.title().map(|s| s.to_string()).unwrap_or_default(), chat.username().map(|s| s.to_string()), "channel".to_string())
                 }
-                teloxide::types::MessageOrigin::HiddenUser { .. } => (None, String::new(), None, String::new()),
+                teloxide::types::MessageOrigin::HiddenUser { sender_user_name, .. } => {
+                    // HiddenUser 没有 ID，但我们可以记录名字到 meta
+                    (None, sender_user_name.clone(), None, "hidden_user".to_string())
+                }
             };
 
             if let Some(id) = eid {
@@ -179,6 +185,18 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
                 .bind(etype)
                 .execute(&state.db)
                 .await;
+            } else if etype == "hidden_user" {
+                // 为 Hidden User 创建一个特殊的实体项，ID 定为 0
+                let _ = sqlx::query(
+                    r#"
+                    INSERT INTO entities (id, name, username, type, updated_at)
+                    VALUES (0, 'Hidden Users', NULL, 'hidden', NOW())
+                    ON CONFLICT (id) DO UPDATE SET 
+                        updated_at = NOW()
+                    "#
+                )
+                .execute(&state.db)
+                .await;
             }
 
             match origin {
@@ -196,13 +214,48 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
                 }
                 teloxide::types::MessageOrigin::HiddenUser { sender_user_name, .. } => {
                     tracing::info!("Forward from HiddenUser: name={}", sender_user_name);
-                    (None, None, None)
+                    // 记录 HiddenUser 的名字到 payload 的 meta 中
+                    payload["meta"]["forward_sender_name"] = serde_json::Value::String(sender_user_name.clone());
+                    (None, None, Some(0)) // Hidden User 的 tg_user_id 设为 0
                 }
             }
         }
         None => {
-            tracing::info!("Not a forwarded message");
-            (None, None, None)
+            tracing::info!("Not a forwarded message, recording sender as source_user_id");
+            let sender_id = msg.from.as_ref().map(|u| u.id.0 as i64).unwrap_or(0);
+            
+            // 自动将发送者存入 entities 表
+            if let Some(user) = msg.from.as_ref() {
+                let name = format!("{}{}", 
+                    user.first_name, 
+                    user.last_name.as_ref().map(|s| format!(" {}", s)).unwrap_or_default()
+                );
+                let _ = sqlx::query(
+                    r#"
+                    INSERT INTO entities (id, name, username, type, updated_at)
+                    VALUES ($1, $2, $3, 'user', NOW())
+                    ON CONFLICT (id) DO UPDATE SET 
+                        name = EXCLUDED.name,
+                        username = EXCLUDED.username,
+                        updated_at = NOW()
+                    "#
+                )
+                .bind(user.id.0 as i64)
+                .bind(name.clone())
+                .bind(user.username.clone())
+                .execute(&state.db)
+                .await;
+
+                // 异步抓取发送者头像
+                let bot_clone = bot.clone();
+                let state_clone = state.clone();
+                let user_id = user.id.0 as i64;
+                tokio::spawn(async move {
+                    update_entity_avatar(bot_clone, state_clone, user_id, name).await;
+                });
+            }
+            
+            (None, None, Some(sender_id))
         }
     };
     

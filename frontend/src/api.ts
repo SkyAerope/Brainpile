@@ -19,7 +19,7 @@ export interface ItemDetail extends Item {
 }
 
 export interface Entity {
-  id: string; // BIGINT as string for JS safety
+  id: string; // BIGINT as string for JS safety, or "unknown"
   name: string;
   username: string | null;
   type: string;

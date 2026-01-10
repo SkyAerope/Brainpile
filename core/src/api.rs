@@ -114,8 +114,7 @@ async fn list_items(
                     SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
                     FROM items
                     WHERE id < $1 AND (tg_chat_id = $2 OR tg_user_id = $2)
-                    ORDER BY id DESC
-                    LIMIT $3
+                    ORDER BY id DESC LIMIT $3
                     "#
                 )
                 .bind(cursor)
@@ -131,8 +130,7 @@ async fn list_items(
                     SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
                     FROM items
                     WHERE (tg_chat_id = $1 OR tg_user_id = $1)
-                    ORDER BY id DESC
-                    LIMIT $2
+                    ORDER BY id DESC LIMIT $2
                     "#
                 )
                 .bind(eid)
@@ -221,7 +219,7 @@ async fn list_items(
             }
         };
 
-        let entity_avatar: Option<String> = None;
+        let _entity_avatar: Option<String> = None;
 
         items.push(json!({
             "id": id,
