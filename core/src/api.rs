@@ -325,8 +325,8 @@ async fn delete_item(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // 1. Fetch info for S3 cleanup
-    let row = sqlx::query("SELECT s3_key, thumbnail_key FROM items WHERE id = $1")
+    // 1. Fetch info for S3 cleanup and Entity cleanup
+    let row = sqlx::query("SELECT s3_key, thumbnail_key, tg_chat_id, tg_user_id FROM items WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.db)
         .await
@@ -335,10 +335,12 @@ async fn delete_item(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let (s3_key, thumbnail_key) = match row {
+    let (s3_key, thumbnail_key, tg_chat_id, tg_user_id) = match row {
         Some(r) => (
             r.try_get::<Option<String>, _>("s3_key").unwrap_or(None),
-            r.try_get::<Option<String>, _>("thumbnail_key").unwrap_or(None)
+            r.try_get::<Option<String>, _>("thumbnail_key").unwrap_or(None),
+            r.try_get::<Option<i64>, _>("tg_chat_id").unwrap_or(None),
+            r.try_get::<Option<i64>, _>("tg_user_id").unwrap_or(None),
         ),
         None => return Err(StatusCode::NOT_FOUND),
     };
@@ -368,6 +370,35 @@ async fn delete_item(
             tracing::error!("Failed to delete item: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+
+    // 2.5 Entity Cleanup: If this was the last item for these entities, delete them
+    let mut entities_to_check = Vec::new();
+    if let Some(cid) = tg_chat_id { entities_to_check.push(cid); }
+    if let Some(uid) = tg_user_id { entities_to_check.push(uid); }
+
+    for eid in entities_to_check {
+        // Check if any other items remain for this entity
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE tg_chat_id = $1 OR tg_user_id = $1")
+            .bind(eid)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to count remaining items: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        
+        if count == 0 {
+            tracing::info!("Entity {} has no more items. Deleting entity.", eid);
+            sqlx::query("DELETE FROM entities WHERE id = $1")
+                .bind(eid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to delete entity: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+        }
+    }
 
     tx.commit().await.map_err(|e| {
         tracing::error!("Failed to commit transaction: {}", e);

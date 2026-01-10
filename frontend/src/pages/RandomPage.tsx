@@ -9,10 +9,11 @@ export const RandomPage: React.FC = () => {
     const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
 
     const load = async () => {
+        if (loading) return;
         setLoading(true);
         try {
             const data = await fetchItems(null, 'random');
-            setItems(data.items);
+            setItems(prev => [...prev, ...data.items]);
         } catch (e) { console.error(e); }
         finally { setLoading(false); }
     };

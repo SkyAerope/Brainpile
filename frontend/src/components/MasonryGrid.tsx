@@ -1,4 +1,4 @@
-import React, { useMemo, useSyncExternalStore } from 'react';
+import React, { useMemo, useSyncExternalStore, useRef, useEffect } from 'react';
 import { Item } from '../api';
 import { ItemCard } from './ItemCard';
 
@@ -56,6 +56,24 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({ items, onItemClick, on
   const contentWidth = isEntitiesPage ? windowWidth - 440 : windowWidth - 80;
   const columnCount = getColumnCount(contentWidth); 
 
+  const loaderRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (loading || !hasMore) return;
+    
+    const obs = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        onLoadMore();
+      }
+    }, { rootMargin: '400px' }); 
+
+    if (loaderRef.current) {
+      obs.observe(loaderRef.current);
+    }
+    
+    return () => obs.disconnect();
+  }, [loading, hasMore, onLoadMore]);
+
   const columns = useMemo(() => {
     const cols: Item[][] = Array.from({ length: columnCount }, () => []);
     const heights = new Array(columnCount).fill(0);
@@ -93,14 +111,19 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({ items, onItemClick, on
         ))}
       </div>
       {(loading || hasMore) && (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
-          {loading ? (
-            <span style={{color: '#71717a'}}>Loading...</span>
-          ) : (
-            <button className="view-btn" onClick={onLoadMore} style={{ alignSelf: 'center' }}>
-              Load More
-            </button>
-          )}
+        <div ref={loaderRef} style={{ padding: '2rem', textAlign: 'center' }}>
+          <button 
+            className="view-btn" 
+            onClick={onLoadMore} 
+            disabled={loading}
+            style={{ 
+              alignSelf: 'center',
+              opacity: loading ? 0.7 : 1,
+              cursor: loading ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {loading ? '加载中' : 'Load More'}
+          </button>
         </div>
       )}
     </>
