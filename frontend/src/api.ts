@@ -18,15 +18,24 @@ export interface ItemDetail extends Item {
   tags: number[];
 }
 
+export interface Entity {
+  id: string; // BIGINT as string for JS safety
+  name: string;
+  username: string | null;
+  type: string;
+  avatar_url: string | null;
+}
+
 export interface ListResponse {
   items: Item[];
   next_cursor: number | null;
 }
 
-export async function fetchItems(cursor?: number | null, mode: 'timeline' | 'random' = 'timeline'): Promise<ListResponse> {
+export async function fetchItems(cursor?: number | null, mode: 'timeline' | 'random' = 'timeline', entity_id?: string | null): Promise<ListResponse> {
   const params = new URLSearchParams();
   if (cursor) params.append('cursor', cursor.toString());
   if (mode) params.append('mode', mode);
+  if (entity_id) params.append('entity_id', entity_id);
   
   const res = await fetch(`/api/v1/items?${params.toString()}`);
   if (!res.ok) throw new Error('Failed to fetch items');
@@ -42,6 +51,12 @@ export async function fetchItemDetail(id: number): Promise<ItemDetail> {
 export async function deleteItem(id: number): Promise<void> {
   const res = await fetch(`/api/v1/items/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete item');
+}
+
+export async function fetchEntities(): Promise<Entity[]> {
+  const res = await fetch('/api/v1/entities');
+  if (!res.ok) throw new Error('Failed to fetch entities');
+  return res.json();
 }
 
 export interface SearchResponse {

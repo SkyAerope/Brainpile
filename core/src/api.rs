@@ -18,6 +18,7 @@ pub async fn run_server(state: AppState) {
         .route("/api/v1/items/:id", get(get_item).delete(delete_item))
         .route("/api/v1/items/:id/raw", get(get_raw_item))
         .route("/api/v1/search", get(search_items))
+        .route("/api/v1/entities", get(list_entities))
         .with_state(state);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 8080));
@@ -31,6 +32,55 @@ struct ListParams {
     cursor: Option<i64>,  // 游标：上一页最后一条的 id
     limit: Option<i64>,
     mode: Option<String>, // "timeline" (默认) 或 "random"
+    entity_id: Option<i64>,
+}
+
+async fn list_entities(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, name, username, type, avatar_url, updated_at
+        FROM entities
+        ORDER BY updated_at DESC
+        "#
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch entities: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut entities = Vec::new();
+    for row in rows {
+        let id: i64 = row.get("id");
+        let name: String = row.get("name");
+        let username: Option<String> = row.get("username");
+        let entity_type: String = row.get("type");
+        let avatar_url: Option<String> = row.get("avatar_url");
+
+        let avatar_final_url = if let Some(url) = avatar_url {
+            if url.starts_with("PROXY:") {
+                let key = &url[6..];
+                state.s3_signing_client.presign_get(key, 3600, None).await.ok()
+            } else {
+                Some(url)
+            }
+        } else {
+            None
+        };
+
+        entities.push(json!({
+            "id": id.to_string(),
+            "name": name,
+            "username": username,
+            "type": entity_type,
+            "avatar_url": avatar_final_url,
+        }));
+    }
+
+    Ok(Json(json!(entities)))
 }
 
 async fn list_items(
@@ -39,12 +89,13 @@ async fn list_items(
 ) -> Json<serde_json::Value> {
     let limit = params.limit.unwrap_or(20).min(100);
     let mode = params.mode.as_deref().unwrap_or("timeline");
+    let entity_id = params.entity_id;
 
     let rows = if mode == "random" {
         // 随机模式
         sqlx::query(
             r#"
-            SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_message_id
+            SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
             FROM items
             ORDER BY RANDOM()
             LIMIT $1
@@ -55,12 +106,45 @@ async fn list_items(
         .await
         .unwrap_or_default()
     } else {
-        // 时间线模式（游标分页）
-        match params.cursor {
-            Some(cursor) => {
+        // 时间线模式（游标分页 + 实体过滤）
+        match (params.cursor, entity_id) {
+            (Some(cursor), Some(eid)) => {
                 sqlx::query(
                     r#"
-                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_message_id
+                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
+                    FROM items
+                    WHERE id < $1 AND (tg_chat_id = $2 OR tg_user_id = $2)
+                    ORDER BY id DESC
+                    LIMIT $3
+                    "#
+                )
+                .bind(cursor)
+                .bind(eid)
+                .bind(limit)
+                .fetch_all(&state.db)
+                .await
+                .unwrap_or_default()
+            }
+            (None, Some(eid)) => {
+                sqlx::query(
+                    r#"
+                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
+                    FROM items
+                    WHERE (tg_chat_id = $1 OR tg_user_id = $1)
+                    ORDER BY id DESC
+                    LIMIT $2
+                    "#
+                )
+                .bind(eid)
+                .bind(limit)
+                .fetch_all(&state.db)
+                .await
+                .unwrap_or_default()
+            }
+            (Some(cursor), None) => {
+                sqlx::query(
+                    r#"
+                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
                     FROM items
                     WHERE id < $1
                     ORDER BY id DESC
@@ -73,10 +157,10 @@ async fn list_items(
                 .await
                 .unwrap_or_default()
             }
-            None => {
+            (None, None) => {
                 sqlx::query(
                     r#"
-                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_message_id
+                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
                     FROM items
                     ORDER BY id DESC
                     LIMIT $1
@@ -101,6 +185,7 @@ async fn list_items(
         let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
         let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
         let tg_chat_id: Option<i64> = row.try_get("tg_chat_id").ok();
+        let tg_user_id: Option<i64> = row.try_get("tg_user_id").ok();
         let tg_message_id: Option<i64> = row.try_get("tg_message_id").ok();
 
         let s3_url = if let Some(key) = s3_key.as_ref() {
@@ -115,18 +200,28 @@ async fn list_items(
              None
         };
 
-        let source_url = match (tg_chat_id, tg_message_id) {
-            (Some(chat_id), Some(msg_id)) if chat_id <= -1000000000000 => {
-                Some(format!("https://t.me/c/{}/{}", (-chat_id - 1000000000000_i64), msg_id))
+        let source_url = if let Some(user_id) = tg_user_id {
+            if user_id > 0 {
+                Some(format!("tg://user?id={}", user_id))
+            } else {
+                None
             }
-            (Some(chat_id), _) if chat_id > 0 => {
-                 Some(format!("tg://user?id={}", chat_id))
+        } else {
+            match (tg_chat_id, tg_message_id) {
+                (Some(chat_id), Some(msg_id)) if chat_id <= -1000000000000 => {
+                    Some(format!("https://t.me/c/{}/{}", (-chat_id - 1000000000000_i64), msg_id))
+                }
+                (Some(chat_id), _) if chat_id > 0 => {
+                    Some(format!("tg://user?id={}", chat_id))
+                }
+                (Some(chat_id), None) if chat_id <= -1000000000000 => {
+                    Some(format!("https://t.me/c/{}", (-chat_id - 1000000000000_i64)))
+                }
+                _ => None
             }
-            (Some(chat_id), None) if chat_id <= -1000000000000 => {
-                 Some(format!("https://t.me/c/{}", (-chat_id - 1000000000000_i64)))
-            }
-            _ => None
         };
+
+        let entity_avatar: Option<String> = None;
 
         items.push(json!({
             "id": id,
