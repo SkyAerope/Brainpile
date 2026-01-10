@@ -8,6 +8,7 @@ mod api;
 use dotenvy::dotenv;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use std::sync::Arc;
+use s3::bucket_ops::BucketConfiguration;
 
 #[tokio::main]
 async fn main() {
@@ -32,11 +33,54 @@ async fn main() {
         .run(&db)
         .await
         .expect("Failed to migrate database");
-        
+
+    // Init S3 & Ensure Bucket Exists
+    let internal_region = s3::region::Region::Custom {
+        region: "us-east-1".to_owned(),
+        endpoint: config.s3_endpoint.clone(),
+    };
+    let credentials = s3::creds::Credentials::new(
+        Some(&config.s3_access_key),
+        Some(&config.s3_secret_key),
+        None, None, None
+    ).expect("Failed to create S3 credentials");
+    
+    let internal_bucket = s3::bucket::Bucket::new(
+        &config.s3_bucket,
+        internal_region,
+        credentials.clone()
+    ).expect("Failed to create bucket struct").with_path_style();
+
+    if !internal_bucket.exists().await.unwrap_or(false) {
+        tracing::info!("Bucket {} missing, creating...", config.s3_bucket);
+        // Try creating with path style
+        let _ = s3::bucket::Bucket::create_with_path_style(
+            &config.s3_bucket,
+            s3::region::Region::Custom {
+                region: "us-east-1".to_owned(),
+                endpoint: config.s3_endpoint.clone(),
+            },
+            credentials.clone(),
+            BucketConfiguration::default()
+        ).await.map_err(|e| tracing::warn!("Failed to create bucket: {}", e));
+    }
+
+    // Init S3 Signing Client (Public)
+    let region = s3::region::Region::Custom {
+        region: "us-east-1".to_owned(),
+        endpoint: config.s3_public_endpoint.clone(),
+    };
+    let s3_signing_client = s3::bucket::Bucket::new(
+        &config.s3_bucket,
+        region,
+        credentials
+    ).expect("Failed to create S3 bucket").with_path_style();
+
     let state = state::AppState {
         db,
         config,
         http_client: reqwest::Client::new(),
+        s3_signing_client: *s3_signing_client,
     };
 
     // Spawn TG Bot

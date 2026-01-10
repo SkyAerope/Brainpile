@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use s3::{Bucket, creds::Credentials, region::Region};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -87,31 +88,32 @@ async fn list_items(
         }
     };
 
-    let items: Vec<_> = rows
-        .iter()
-        .map(|row| {
-            let id: i64 = row.get("id");
-            let item_type: String = row.get("item_type");
-            let content_text: Option<String> = row.get("content_text");
-            let s3_key: Option<String> = row.get("s3_key");
-            let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
-            let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
+    let mut items = Vec::new();
 
-            let s3_url = s3_key.as_ref().map(|key| {
-                format!("{}/{}/{}", state.config.s3_endpoint, state.config.s3_bucket, key)
-            });
+    for row in &rows {
+        let id: i64 = row.get("id");
+        let item_type: String = row.get("item_type");
+        let content_text: Option<String> = row.get("content_text");
+        let s3_key: Option<String> = row.get("s3_key");
+        let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
+        let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
 
-            json!({
-                "id": id,
-                "type": item_type,
-                "content": content_text,
-                "s3_url": s3_url,
-                "created_at": created_at,
-                "width": meta.get("width"),
-                "height": meta.get("height"),
-            })
-        })
-        .collect();
+        let s3_url = if let Some(key) = s3_key.as_ref() {
+             state.s3_signing_client.presign_get(key, 3600, None).await.ok()
+        } else {
+             None
+        };
+
+        items.push(json!({
+            "id": id,
+            "type": item_type,
+            "content": content_text,
+            "s3_url": s3_url,
+            "created_at": created_at,
+            "width": meta.get("width"),
+            "height": meta.get("height"),
+        }));
+    }
 
     // 计算下一页游标
     let next_cursor = if mode != "random" && items.len() == limit as usize {
@@ -158,9 +160,11 @@ async fn get_item(
             let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
             let tags: Vec<i32> = row.try_get("tags").unwrap_or_default();
 
-            let s3_url = s3_key.as_ref().map(|key| {
-                format!("{}/{}/{}", state.config.s3_endpoint, state.config.s3_bucket, key)
-            });
+            let s3_url = if let Some(key) = s3_key.as_ref() {
+                state.s3_signing_client.presign_get(key, 3600, None).await.ok()
+            } else {
+                None
+            };
 
             // 构建 TG 跳转链接
             let tg_link = match (tg_chat_id, tg_message_id) {
@@ -174,7 +178,7 @@ async fn get_item(
             Ok(Json(json!({
                 "id": id,
                 "type": item_type,
-                "content_text": content_text,
+                "content": content_text,
                 "searchable_text": searchable_text,
                 "s3_url": s3_url,
                 "tg_link": tg_link,
@@ -193,13 +197,83 @@ async fn delete_item(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // 1. Fetch info for S3 cleanup
+    let row = sqlx::query("SELECT s3_key, thumbnail_key FROM items WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch item for deletion: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let (s3_key, thumbnail_key) = match row {
+        Some(r) => (
+            r.try_get::<Option<String>, _>("s3_key").unwrap_or(None),
+            r.try_get::<Option<String>, _>("thumbnail_key").unwrap_or(None)
+        ),
+        None => return Err(StatusCode::NOT_FOUND),
+    };
+
+    // 2. Database Transaction
+    let mut tx = state.db.begin().await.map_err(|e| {
+        tracing::error!("Failed to begin transaction: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Delete tasks first (to satisfy FK)
+    sqlx::query("DELETE FROM tasks WHERE item_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to delete tasks: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // Delete item
     let result = sqlx::query("DELETE FROM items WHERE id = $1")
         .bind(id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::error!("Failed to delete item: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
+    tx.commit().await.map_err(|e| {
+        tracing::error!("Failed to commit transaction: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // 3. S3 Cleanup
     if result.rows_affected() > 0 {
+        // Init internal bucket for deletion
+        let region = Region::Custom {
+            region: "us-east-1".to_owned(),
+            endpoint: state.config.s3_endpoint.clone(),
+        };
+        let credentials = Credentials::new(
+            Some(&state.config.s3_access_key),
+            Some(&state.config.s3_secret_key),
+            None, None, None
+        ).expect("Failed to create S3 credentials");
+        
+        let bucket = Bucket::new(
+            &state.config.s3_bucket,
+            region,
+            credentials
+        ).expect("Failed to create S3 bucket").with_path_style();
+
+        if let Some(key) = s3_key {
+            let _ = bucket.delete_object(&key).await
+                .map_err(|e| tracing::warn!("Failed to delete S3 object {}: {}", key, e));
+        }
+        if let Some(key) = thumbnail_key {
+            let _ = bucket.delete_object(&key).await
+                .map_err(|e| tracing::warn!("Failed to delete S3 thumbnail {}: {}", key, e));
+        }
+
         Ok(Json(json!({ "success": true })))
     } else {
         Err(StatusCode::NOT_FOUND)
@@ -217,11 +291,12 @@ async fn get_raw_item(
 
     if let Ok(Some(row)) = row {
         let s3_key: Option<String> = row.get("s3_key");
-        if let Some(key) = s3_key {
-            // MVP: Redirect to MinIO directly (assuming localhost access works)
-            let url = format!("{}/{}/{}", state.config.s3_endpoint, state.config.s3_bucket, key);
-            return axum::response::Redirect::temporary(&url).into_response();
-        }
+            // Presigned URL
+            if let Some(key) = s3_key {
+                if let Ok(url) = state.s3_signing_client.presign_get(&key, 3600, None).await {
+                    return axum::response::Redirect::temporary(&url).into_response();
+                }
+            }
     }
 
     axum::http::StatusCode::NOT_FOUND.into_response()

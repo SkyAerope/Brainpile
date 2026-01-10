@@ -4,6 +4,7 @@ use serde::Deserialize;
 pub struct Config {
     pub database_url: String,
     pub s3_endpoint: String,
+    pub s3_public_endpoint: String,
     pub s3_access_key: String,
     pub s3_secret_key: String,
     pub s3_bucket: String,
@@ -22,6 +23,7 @@ impl Config {
         // We can use dotenvy before calling this in main
         let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let s3_endpoint = std::env::var("S3_ENDPOINT").expect("S3_ENDPOINT must be set");
+        let s3_public_endpoint = std::env::var("S3_PUBLIC_ENDPOINT").unwrap_or_else(|_| "http://localhost:9000".to_string());
         let s3_access_key = std::env::var("S3_ACCESS_KEY").expect("S3_ACCESS_KEY must be set");
         let s3_secret_key = std::env::var("S3_SECRET_KEY").expect("S3_SECRET_KEY must be set");
         let s3_bucket = std::env::var("S3_BUCKET").unwrap_or_else(|_| "brainpile".to_string());
@@ -41,6 +43,7 @@ impl Config {
         Self {
             database_url,
             s3_endpoint,
+            s3_public_endpoint,
             s3_access_key,
             s3_secret_key,
             s3_bucket,
