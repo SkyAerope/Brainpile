@@ -24,6 +24,14 @@ services:
       - brainpile-clip
     restart: unless-stopped
 
+  brainpile-frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - brainpile-core
+    restart: unless-stopped
+
   brainpile-clip:
     build: ./clip
     ports:

@@ -1,0 +1,14 @@
+:80
+
+root * /srv
+
+encode gzip
+
+handle /api/* {
+	reverse_proxy brainpile-core:8080
+}
+
+handle {
+	try_files {path} {path}/ /index.html
+	file_server
+}
