@@ -245,7 +245,7 @@ body {
 .entities-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 12px;
+  padding: 0;
 }
 
 .entity-item {
@@ -256,7 +256,6 @@ body {
   cursor: pointer;
   border-radius: 12px;
   transition: background-color 0.2s;
-  margin-bottom: 4px;
 }
 
 .entity-item:hover {
@@ -290,6 +289,21 @@ body {
   flex-direction: column;
   overflow: hidden;
   gap: 2px;
+  flex: 1;
+}
+
+.entity-header-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.entity-updated-at {
+  margin-left: auto;
+  font-size: 12px;
+  color: #767676;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .entity-name {

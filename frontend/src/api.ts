@@ -24,6 +24,13 @@ export interface Entity {
   username: string | null;
   type: string;
   avatar_url: string | null;
+  updated_at?: string | null;
+}
+
+export interface EntitiesPageResponse {
+  entities: Entity[];
+  next_cursor: string | null;
+  total: number;
 }
 
 export interface ListResponse {
@@ -58,10 +65,24 @@ export async function deleteItem(id: number): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete item');
 }
 
-export async function fetchEntities(): Promise<Entity[]> {
-  const res = await fetch('/api/v1/entities');
+export async function fetchEntitiesPage(
+  cursor?: string | null,
+  limit: number = 10,
+  signal?: AbortSignal
+): Promise<EntitiesPageResponse> {
+  const params = new URLSearchParams();
+  if (cursor) params.append('cursor', cursor);
+  params.append('limit', String(limit));
+
+  const res = await fetch(`/api/v1/entities?${params.toString()}`, { signal });
   if (!res.ok) throw new Error('Failed to fetch entities');
   return res.json();
+}
+
+// Back-compat helper: returns a flat list. Prefer fetchEntitiesPage() for pagination.
+export async function fetchEntities(signal?: AbortSignal): Promise<Entity[]> {
+  const page = await fetchEntitiesPage(null, 1000, signal);
+  return page.entities;
 }
 
 export interface SearchResponse {

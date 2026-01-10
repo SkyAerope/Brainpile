@@ -12,6 +12,13 @@ use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 
+#[derive(Deserialize)]
+struct ListEntitiesParams {
+    // Cursor format: "<rfc3339>|<id>" where id is BIGINT.
+    cursor: Option<String>,
+    limit: Option<i64>,
+}
+
 pub async fn run_server(state: AppState) {
     let app = Router::new()
         .route("/api/v1/items", get(list_items))
@@ -37,33 +44,90 @@ struct ListParams {
 
 async fn list_entities(
     State(state): State<AppState>,
+    Query(params): Query<ListEntitiesParams>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, name, username, type, avatar_url, updated_at
-        FROM entities
-        ORDER BY updated_at DESC
-        "#
-    )
-    .fetch_all(&state.db)
-    .await
+    let limit = params.limit.unwrap_or(10).clamp(1, 100);
+
+    let (cursor_ts, cursor_id): (Option<chrono::DateTime<chrono::Utc>>, Option<i64>) =
+        match params.cursor.as_deref() {
+            None => (None, None),
+            Some(raw) => {
+                let mut parts = raw.splitn(2, '|');
+                let ts_str = parts.next();
+                let id_str = parts.next();
+                match (ts_str, id_str) {
+                    (Some(ts), Some(id)) => {
+                        let parsed_ts = chrono::DateTime::parse_from_rfc3339(ts)
+                            .map(|dt| dt.with_timezone(&chrono::Utc))
+                            .ok();
+                        let parsed_id = id.parse::<i64>().ok();
+                        (parsed_ts, parsed_id)
+                    }
+                    _ => (None, None),
+                }
+            }
+        };
+
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entities")
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to count entities: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let rows = if let (Some(ts), Some(id)) = (cursor_ts, cursor_id) {
+        sqlx::query(
+            r#"
+            SELECT id, name, username, type, avatar_url, updated_at
+            FROM entities
+            WHERE updated_at < $1 OR (updated_at = $1 AND id < $2)
+            ORDER BY updated_at DESC, id DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(ts)
+        .bind(id)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await
+    } else {
+        sqlx::query(
+            r#"
+            SELECT id, name, username, type, avatar_url, updated_at
+            FROM entities
+            ORDER BY updated_at DESC, id DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await
+    }
     .map_err(|e| {
         tracing::error!("Failed to fetch entities: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     let mut entities = Vec::new();
-    for row in rows {
+    let mut next_cursor: Option<String> = None;
+
+    for row in rows.iter() {
         let id: i64 = row.get("id");
         let name: String = row.get("name");
         let username: Option<String> = row.get("username");
         let entity_type: String = row.get("type");
         let avatar_url: Option<String> = row.get("avatar_url");
+        let updated_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("updated_at").ok();
 
         let avatar_final_url = if let Some(url) = avatar_url {
             if url.starts_with("PROXY:") {
                 let key = &url[6..];
-                state.s3_signing_client.presign_get(key, 3600, None).await.ok()
+                state
+                    .s3_signing_client
+                    .presign_get(key, 3600, None)
+                    .await
+                    .ok()
             } else {
                 Some(url)
             }
@@ -77,10 +141,25 @@ async fn list_entities(
             "username": username,
             "type": entity_type,
             "avatar_url": avatar_final_url,
+            "updated_at": updated_at,
         }));
     }
 
-    Ok(Json(json!(entities)))
+    if entities.len() == limit as usize {
+        if let Some(last) = rows.last() {
+            let last_id: i64 = last.get("id");
+            let last_ts: Option<chrono::DateTime<chrono::Utc>> = last.try_get("updated_at").ok();
+            if let Some(ts) = last_ts {
+                next_cursor = Some(format!("{}|{}", ts.to_rfc3339(), last_id));
+            }
+        }
+    }
+
+    Ok(Json(json!({
+        "entities": entities,
+        "next_cursor": next_cursor,
+        "total": total
+    })))
 }
 
 async fn list_items(
