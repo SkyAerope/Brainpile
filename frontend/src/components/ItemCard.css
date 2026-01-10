@@ -44,13 +44,26 @@
   left: 0;
   width: 100%;
   height: 100%;
+  /* 顶部到底部的渐变遮罩 */
+  background: linear-gradient(
+    to bottom,
+    #0000005e 10%,
+    /* rgba(0, 0, 0, 0) 40%, */
+    /* rgba(0, 0, 0, 0) 60%, */
+    #f5f5f500 100%
+  );
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 12px;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  /* transition: opacity 0.3s ease; */
   pointer-events: none;
+}
+
+/* 移除之前显式的变暗，改用 overlay 的渐变 */
+.item-card:hover .item-media img {
+  filter: none;
 }
 
 /* Show overlay on hover */
@@ -59,7 +72,6 @@
   pointer-events: auto;
 }
 
-/* Buttons on Overlay */
 .view-btn {
   align-self: flex-end; /* Top-right usually "Save" on Pinterest */
   background: #e60023; /* Pinterest Red */
@@ -121,7 +133,7 @@
 .item-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
   margin-top: 4px;
   font-size: 11px;
   color: #5f5f5f;
@@ -129,6 +141,79 @@
 
 .type-badge {
   text-transform: capitalize;
+}
+
+/* More Menu Styles */
+.item-more-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.more-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #111;
+  transition: background 0.2s;
+}
+
+.more-btn:hover {
+  background: #f0f0f0;
+}
+
+.dropdown-menu {
+  position: absolute;
+  bottom: 100%; /* 打开位置在按钮上方 */
+  right: 0;
+  width: 240px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 0 20px rgba(0,0,0,0.15);
+  padding: 8px;
+  margin-bottom: 8px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-header {
+  font-size: 12px;
+  font-weight: 500;
+  color: #767676;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: #111;
+  transition: background 0.2s;
+}
+
+.dropdown-item:hover {
+  background: #f0f0f0;
+}
+
+.dropdown-item svg {
+  color: #111;
 }
 
 /* Placeholder if no image */
@@ -147,14 +232,30 @@
 .item-card.type-text .item-content {
   background: #f5f5f5;
   border-radius: 16px;
-  padding: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
 }
 
 .item-card.type-text .text-title {
   color: #111;
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  -webkit-line-clamp: 6; /* 纯文字卡片展示更多行数 */
+  line-clamp: 6;
 }
 
-.item-card.type-text:hover .item-content {
-  background: #e2e2e2;
+.item-card.type-text .item-meta {
+  margin-top: auto;
+}
+
+/* 针对纯图片（无 content）的处理 */
+.item-card:not(.type-text) .item-content:empty {
+    display: none;
+}
+
+/* 如果只有菜单没有文字，调整间距 */
+.item-card:not(.type-text) .item-content {
+    padding-top: 4px;
 }
