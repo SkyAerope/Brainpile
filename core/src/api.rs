@@ -44,7 +44,7 @@ async fn list_items(
         // 随机模式
         sqlx::query(
             r#"
-            SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta
+            SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_message_id
             FROM items
             ORDER BY RANDOM()
             LIMIT $1
@@ -60,7 +60,7 @@ async fn list_items(
             Some(cursor) => {
                 sqlx::query(
                     r#"
-                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta
+                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_message_id
                     FROM items
                     WHERE id < $1
                     ORDER BY id DESC
@@ -76,7 +76,7 @@ async fn list_items(
             None => {
                 sqlx::query(
                     r#"
-                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta
+                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_message_id
                     FROM items
                     ORDER BY id DESC
                     LIMIT $1
@@ -100,6 +100,8 @@ async fn list_items(
         let thumbnail_key: Option<String> = row.try_get("thumbnail_key").ok();
         let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
         let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
+        let tg_chat_id: Option<i64> = row.try_get("tg_chat_id").ok();
+        let tg_message_id: Option<i64> = row.try_get("tg_message_id").ok();
 
         let s3_url = if let Some(key) = s3_key.as_ref() {
              state.s3_signing_client.presign_get(key, 3600, None).await.ok()
@@ -113,6 +115,19 @@ async fn list_items(
              None
         };
 
+        let source_url = match (tg_chat_id, tg_message_id) {
+            (Some(chat_id), Some(msg_id)) if chat_id <= -1000000000000 => {
+                Some(format!("https://t.me/c/{}/{}", (-chat_id - 1000000000000_i64), msg_id))
+            }
+            (Some(chat_id), _) if chat_id > 0 => {
+                 Some(format!("tg://user?id={}", chat_id))
+            }
+            (Some(chat_id), None) if chat_id <= -1000000000000 => {
+                 Some(format!("https://t.me/c/{}", (-chat_id - 1000000000000_i64)))
+            }
+            _ => None
+        };
+
         items.push(json!({
             "id": id,
             "type": item_type,
@@ -122,7 +137,7 @@ async fn list_items(
             "created_at": created_at,
             "width": meta.get("width"),
             "height": meta.get("height"),
-            "source_url": meta.get("source_url"),
+            "source_url": source_url,
         }));
     }
 
