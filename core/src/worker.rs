@@ -227,13 +227,29 @@ async fn perform_task(
         }
     }
     
-    // 图片宽高提取（使用 image crate）
+    // 图片处理：宽高提取及缩略图生成
     if item_type == "image" && !file_bytes.is_empty() {
         if let Ok(img) = image::load_from_memory(&file_bytes) {
             meta["width"] = serde_json::json!(img.width());
             meta["height"] = serde_json::json!(img.height());
             meta["file_size"] = serde_json::json!(file_bytes.len());
             tracing::info!("Image dimensions: {}x{}", img.width(), img.height());
+
+            // 生成缩略图 (限制最大宽度或高度为 800px)
+            let thumbnail = img.thumbnail(800, 800);
+            let mut thumb_buf = std::io::Cursor::new(Vec::new());
+            if thumbnail.write_to(&mut thumb_buf, image::ImageFormat::Jpeg).is_ok() {
+                let thumb_data = thumb_buf.into_inner();
+                let thumb_key = format!(
+                    "{}/{}_thumb.jpg",
+                    chrono::Utc::now().format("%Y/%m/%d"),
+                    uuid::Uuid::new_v4()
+                );
+                if bucket.put_object(&thumb_key, &thumb_data).await.is_ok() {
+                    thumbnail_key = Some(thumb_key);
+                    tracing::info!("Image thumbnail uploaded");
+                }
+            }
         }
     }
     
