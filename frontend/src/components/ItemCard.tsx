@@ -27,7 +27,11 @@ export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
   
   return (
     <div className={`item-card type-${item.type}`} onClick={() => onClick(item)}>
-      {item.type !== 'text' && (
+      {item.type === 'text' ? (
+        <div className="item-media-placeholder">
+           <p className="text-title">{item.content}</p>
+        </div>
+      ) : (
         <div 
             className="item-media" 
             style={aspectRatio ? { aspectRatio: `${aspectRatio}` } : undefined}
@@ -63,7 +67,7 @@ export const ItemCard: React.FC<Props> = ({ item, onClick }) => {
         </div>
       )}
       <div className="item-content">
-        {item.content && <p className="text-title">{item.content}</p>}
+        {item.type !== 'text' && item.content && <p className="text-title">{item.content}</p>}
         <div className="item-meta">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
                 <span className="type-badge">{item.type}</span>

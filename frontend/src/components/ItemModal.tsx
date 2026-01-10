@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ItemDetail, fetchItemDetail, deleteItem } from '../api';
 import './ItemModal.css';
-import { X, Trash2, ExternalLink, Calendar, FileText, Image as ImageIcon } from 'lucide-react';
+import { X, Trash2, ExternalLink, Calendar, FileText, Image as ImageIcon, Download } from 'lucide-react';
 
 interface Props {
   itemId: number;
@@ -92,9 +92,10 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
 
                 <div className="modal-actions">
                     <button className="btn btn-delete" onClick={handleDelete}>
-                        <Trash2 size={16} /> Delete
+                      <Trash2 size={16} /> Delete
                     </button>
-                    <a href={`/api/v1/items/${detail.id}/raw`} target="_blank" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+                    <a href={`/api/v1/items/${detail.id}/raw`} target="_blank" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Download size={16} />
                       Download Raw
                     </a>
                 </div>
