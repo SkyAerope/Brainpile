@@ -8,6 +8,17 @@ export interface Item {
   width?: number;
   height?: number;
   source_url?: string | null;
+  tags?: number[];
+  tag_objects?: Tag[];
+}
+
+export interface Tag {
+  id: number;
+  icon_type: string;
+  icon_value: string;
+  label?: string | null;
+  asset_url?: string | null;
+  asset_mime?: string | null;
 }
 
 export interface ItemDetail extends Item {
@@ -42,12 +53,14 @@ export async function fetchItems(
   cursor?: number | null,
   mode: 'timeline' | 'random' = 'timeline',
   entity_id?: string | null,
+  tag_id?: number | null,
   signal?: AbortSignal
 ): Promise<ListResponse> {
   const params = new URLSearchParams();
   if (cursor) params.append('cursor', cursor.toString());
   if (mode) params.append('mode', mode);
   if (entity_id) params.append('entity_id', entity_id);
+  if (tag_id) params.append('tag_id', tag_id.toString());
   
   const res = await fetch(`/api/v1/items?${params.toString()}`, { signal });
   if (!res.ok) throw new Error('Failed to fetch items');
@@ -98,4 +111,40 @@ export async function searchItems(query: string, type?: string, signal?: AbortSi
   const res = await fetch(`/api/v1/search?${params.toString()}`, { signal });
   if (!res.ok) throw new Error('Failed to search items');
   return res.json();
+}
+
+export async function fetchTags(signal?: AbortSignal): Promise<Tag[]> {
+  const res = await fetch('/api/v1/tags', { signal });
+  if (!res.ok) throw new Error('Failed to fetch tags');
+  const data = await res.json();
+  return (data.tags || []) as Tag[];
+}
+
+export async function createTag(
+  payload: { icon_type: 'emoji' | 'tmoji'; icon_value: string; label?: string | null },
+  signal?: AbortSignal
+): Promise<{ id: number }> {
+  const res = await fetch('/api/v1/tags', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!res.ok) throw new Error('Failed to create tag');
+  return res.json();
+}
+
+export async function updateTagLabel(id: number, label: string | null, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(`/api/v1/tags/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label }),
+    signal,
+  });
+  if (!res.ok) throw new Error('Failed to update tag');
+}
+
+export async function deleteTag(id: number, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(`/api/v1/tags/${id}`, { method: 'DELETE', signal });
+  if (!res.ok) throw new Error('Failed to delete tag');
 }

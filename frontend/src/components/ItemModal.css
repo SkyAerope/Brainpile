@@ -149,6 +149,29 @@
     font-size: 0.8rem;
 }
 
+.modal-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.modal-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--card-bg);
+  /* border: 1px solid rgba(255, 255, 255, 0.10); */
+  font-size: 12px;
+  line-height: 1;
+}
+
+.modal-tag-label {
+  opacity: 0.9;
+}
+
+
 .modal-actions {
     display: flex;
     gap: 12px;

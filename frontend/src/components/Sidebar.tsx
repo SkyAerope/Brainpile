@@ -1,11 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, Shuffle, Users, Settings } from 'lucide-react';
+import { Clock, Shuffle, Users, Tag, Settings } from 'lucide-react';
 import icon from '../assets/icon.svg';
 import './Sidebar.css';
 
 interface SidebarProps {
-  mode: 'timeline' | 'random' | 'search' | 'entities';
+  mode: 'timeline' | 'random' | 'search' | 'entities' | 'tags';
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ mode }) => {
@@ -37,6 +37,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ mode }) => {
           title="Entities"
         >
           <Users size={24} />
+        </Link>
+        <Link 
+          to="/tags"
+          className={`nav-item ${mode === 'tags' ? 'active' : ''}`} 
+          title="Tags"
+        >
+          <Tag size={24} />
         </Link>
       </nav>
       <div className="sidebar-footer">

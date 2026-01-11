@@ -24,3 +24,4 @@ md5 = "0.7"
 tempfile = "3.10"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+flate2 = "1.0"

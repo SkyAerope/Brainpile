@@ -3,6 +3,7 @@ import { Item, deleteItem } from '../api';
 import './ItemCard.css';
 import { ExternalLink, Image as ImageIcon, MoreHorizontal, Download, Trash2, Send } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
+import { TagIcon } from './TagIcon';
 
 interface Props {
   item: Item;
@@ -92,6 +93,15 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
       )}
       <div className="item-content">
         {item.type !== 'text' && item.content && <p className="text-title">{item.content}</p>}
+        {!!item.tag_objects?.length && (
+          <div className="item-tags" onClick={(e) => e.stopPropagation()}>
+            {item.tag_objects.slice(0, 8).map((tag) => (
+              <span key={tag.id} className="tag-pill" title={tag.label ?? undefined}>
+                <TagIcon tag={tag} size={16} title={tag.label ?? undefined} />
+              </span>
+            ))}
+          </div>
+        )}
         <div className="item-meta">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
                 <span className="type-badge">{item.type}</span>

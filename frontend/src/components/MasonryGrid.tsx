@@ -65,8 +65,8 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
 
   const safeItems = useMemo(() => items.filter(isValidItem), [items]);
 
-  const isEntitiesPage = window.location.pathname.startsWith('/entities');
-  const contentWidth = isEntitiesPage ? windowWidth - 440 : windowWidth - 80;
+  const isDrawerPage = window.location.pathname.startsWith('/entities') || window.location.pathname.startsWith('/tags');
+  const contentWidth = isDrawerPage ? windowWidth - 440 : windowWidth - 80;
   const columnCount = getColumnCount(contentWidth);
 
   const loaderRef = useRef<HTMLDivElement>(null);

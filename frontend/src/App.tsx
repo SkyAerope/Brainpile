@@ -3,6 +3,7 @@ import { Layout } from './components/Layout';
 import { TimelinePage } from './pages/TimelinePage';
 import { RandomPage } from './pages/RandomPage';
 import { EntitiesPage } from './pages/EntitiesPage';
+import { TagsPage } from './pages/TagsPage';
 import './index.css';
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
           <Route index element={<TimelinePage />} />
           <Route path="random" element={<RandomPage />} />
           <Route path="entities" element={<EntitiesPage />} />
+          <Route path="tags" element={<TagsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

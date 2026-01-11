@@ -3,6 +3,7 @@ import { ItemDetail, fetchItemDetail, deleteItem } from '../api';
 import './ItemModal.css';
 import { X, Trash2, ExternalLink, Calendar, FileText, Image as ImageIcon, Download } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
+import { TagIcon } from './TagIcon';
 
 interface Props {
   itemId: number;
@@ -88,6 +89,20 @@ export const ItemModal: React.FC<Props> = ({ itemId, onClose, onDeleted }) => {
                     <h3>Content</h3>
                     <p className="content-text">{detail.content || 'No content'}</p>
                 </div>
+
+                {!!detail.tag_objects?.length && (
+                  <div className="detail-section">
+                    <h3>Tags</h3>
+                    <div className="modal-tags">
+                      {detail.tag_objects.map((tag) => (
+                        <span key={tag.id} className="modal-tag-pill" title={tag.label ?? undefined}>
+                          <TagIcon tag={tag} size={18} title={tag.label ?? undefined} />
+                          {tag.label && <span className="modal-tag-label">{tag.label}</span>}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {detail.searchable_text && detail.searchable_text !== detail.content && (
                      <div className="detail-section">

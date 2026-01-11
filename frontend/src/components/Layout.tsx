@@ -11,7 +11,8 @@ export const Layout: React.FC = () => {
   // Determine mode from path
   const mode = location.pathname === '/' ? 'timeline' : 
                location.pathname === '/random' ? 'random' : 
-               location.pathname.startsWith('/entities') ? 'entities' : 'timeline';
+               location.pathname.startsWith('/entities') ? 'entities' :
+               location.pathname.startsWith('/tags') ? 'tags' : 'timeline';
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,10 +26,10 @@ export const Layout: React.FC = () => {
     navigate('/');
   };
 
-  const isEntitiesPage = location.pathname.startsWith('/entities');
+  const hasDrawerPage = location.pathname.startsWith('/entities') || location.pathname.startsWith('/tags');
 
   return (
-    <div className={`app-layout ${isEntitiesPage ? 'has-drawer' : ''}`}>
+    <div className={`app-layout ${hasDrawerPage ? 'has-drawer' : ''}`}>
       <Sidebar mode={mode as any} />
       
       <main className="main-layout">

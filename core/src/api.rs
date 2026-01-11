@@ -11,6 +11,9 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
+use sqlx::{Postgres, QueryBuilder};
+use sqlx::postgres::PgRow;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Deserialize)]
 struct ListEntitiesParams {
@@ -26,6 +29,8 @@ pub async fn run_server(state: AppState) {
         .route("/api/v1/items/:id/raw", get(get_raw_item))
         .route("/api/v1/search", get(search_items))
         .route("/api/v1/entities", get(list_entities))
+        .route("/api/v1/tags", get(list_tags).post(create_tag))
+        .route("/api/v1/tags/:id", axum::routing::patch(update_tag).delete(delete_tag))
         .with_state(state);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 8080));
@@ -40,6 +45,74 @@ struct ListParams {
     limit: Option<i64>,
     mode: Option<String>, // "timeline" (默认) 或 "random"
     entity_id: Option<i64>,
+    tag_id: Option<i32>,
+}
+
+#[derive(Deserialize)]
+struct CreateTagRequest {
+    icon_type: String,  // "emoji" | "tmoji"
+    icon_value: String,
+    label: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateTagRequest {
+    label: Option<String>,
+}
+
+fn resolve_proxy_url(state: &AppState, raw: Option<String>) -> impl std::future::Future<Output = Option<String>> + '_ {
+    async move {
+        let Some(url) = raw else { return None; };
+        if url.starts_with("PROXY:") {
+            let key = &url[6..];
+            state.s3_signing_client.presign_get(key, 3600, None).await.ok()
+        } else {
+            Some(url)
+        }
+    }
+}
+
+async fn fetch_tags_map(state: &AppState, tag_ids: &[i32]) -> HashMap<i32, serde_json::Value> {
+    if tag_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let rows = sqlx::query(
+        r#"
+        SELECT id, icon_type, icon_value, label, asset_url, asset_mime
+        FROM tags
+        WHERE id = ANY($1)
+        "#,
+    )
+    .bind(tag_ids)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let mut map = HashMap::new();
+    for row in rows {
+        let id: i32 = row.get("id");
+        let icon_type: String = row.get("icon_type");
+        let icon_value: String = row.get("icon_value");
+        let label: Option<String> = row.try_get("label").ok();
+        let asset_url_raw: Option<String> = row.try_get("asset_url").ok();
+        let asset_mime: Option<String> = row.try_get("asset_mime").ok();
+
+        let asset_url = resolve_proxy_url(state, asset_url_raw).await;
+        map.insert(
+            id,
+            json!({
+                "id": id,
+                "icon_type": icon_type,
+                "icon_value": icon_value,
+                "label": label,
+                "asset_url": asset_url,
+                "asset_mime": asset_mime,
+            }),
+        );
+    }
+
+    map
 }
 
 async fn list_entities(
@@ -169,89 +242,68 @@ async fn list_items(
     let limit = params.limit.unwrap_or(20).min(100);
     let mode = params.mode.as_deref().unwrap_or("timeline");
     let entity_id = params.entity_id;
+    let tag_id = params.tag_id;
 
-    let rows = if mode == "random" {
-        // 随机模式
-        sqlx::query(
-            r#"
-            SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
-            FROM items
-            ORDER BY RANDOM()
-            LIMIT $1
-            "#
-        )
-        .bind(limit)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default()
-    } else {
-        // 时间线模式（游标分页 + 实体过滤）
-        match (params.cursor, entity_id) {
-            (Some(cursor), Some(eid)) => {
-                sqlx::query(
-                    r#"
-                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
-                    FROM items
-                    WHERE id < $1 AND (tg_chat_id = $2 OR tg_user_id = $2)
-                    ORDER BY id DESC LIMIT $3
-                    "#
-                )
-                .bind(cursor)
-                .bind(eid)
-                .bind(limit)
-                .fetch_all(&state.db)
-                .await
-                .unwrap_or_default()
-            }
-            (None, Some(eid)) => {
-                sqlx::query(
-                    r#"
-                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
-                    FROM items
-                    WHERE (tg_chat_id = $1 OR tg_user_id = $1)
-                    ORDER BY id DESC LIMIT $2
-                    "#
-                )
-                .bind(eid)
-                .bind(limit)
-                .fetch_all(&state.db)
-                .await
-                .unwrap_or_default()
-            }
-            (Some(cursor), None) => {
-                sqlx::query(
-                    r#"
-                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
-                    FROM items
-                    WHERE id < $1
-                    ORDER BY id DESC
-                    LIMIT $2
-                    "#
-                )
-                .bind(cursor)
-                .bind(limit)
-                .fetch_all(&state.db)
-                .await
-                .unwrap_or_default()
-            }
-            (None, None) => {
-                sqlx::query(
-                    r#"
-                    SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id
-                    FROM items
-                    ORDER BY id DESC
-                    LIMIT $1
-                    "#
-                )
-                .bind(limit)
-                .fetch_all(&state.db)
-                .await
-                .unwrap_or_default()
-            }
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id, tags FROM items",
+    );
+
+    let mut has_where = false;
+    let mut push_where = |qb: &mut QueryBuilder<Postgres>, clause: &str| {
+        if !has_where {
+            qb.push(" WHERE ");
+            has_where = true;
+        } else {
+            qb.push(" AND ");
         }
+        qb.push(clause);
     };
 
+    if mode != "random" {
+        if let Some(cursor) = params.cursor {
+            push_where(&mut qb, "id < ");
+            qb.push_bind(cursor);
+        }
+    }
+
+    if let Some(eid) = entity_id {
+        push_where(&mut qb, "(tg_chat_id = ");
+        qb.push_bind(eid);
+        qb.push(" OR tg_user_id = ");
+        qb.push_bind(eid);
+        qb.push(")");
+    }
+
+    if let Some(tid) = tag_id {
+        push_where(&mut qb, "tags @> ARRAY[");
+        qb.push_bind(tid);
+        qb.push("]::int[]");
+    }
+
+    if mode == "random" {
+        qb.push(" ORDER BY RANDOM() ");
+        qb.push(" LIMIT ");
+        qb.push_bind(limit);
+    } else {
+        qb.push(" ORDER BY id DESC ");
+        qb.push(" LIMIT ");
+        qb.push_bind(limit);
+    }
+
+    let rows: Vec<PgRow> = qb.build().fetch_all(&state.db).await.unwrap_or_default();
+
     let mut items = Vec::new();
+
+    let mut unique_tag_ids: HashSet<i32> = HashSet::new();
+    for row in &rows {
+        let ids: Vec<i32> = row.try_get("tags").unwrap_or_default();
+        for id in ids {
+            unique_tag_ids.insert(id);
+        }
+    }
+    let mut unique_tag_ids_vec: Vec<i32> = unique_tag_ids.into_iter().collect();
+    unique_tag_ids_vec.sort_unstable();
+    let tags_map = fetch_tags_map(&state, &unique_tag_ids_vec).await;
 
     for row in &rows {
         let id: i64 = row.get("id");
@@ -264,6 +316,11 @@ async fn list_items(
         let tg_chat_id: Option<i64> = row.try_get("tg_chat_id").ok();
         let tg_user_id: Option<i64> = row.try_get("tg_user_id").ok();
         let tg_message_id: Option<i64> = row.try_get("tg_message_id").ok();
+        let tags: Vec<i32> = row.try_get("tags").unwrap_or_default();
+        let tag_objects: Vec<serde_json::Value> = tags
+            .iter()
+            .filter_map(|id| tags_map.get(id).cloned())
+            .collect();
 
         let s3_url = if let Some(key) = s3_key.as_ref() {
              state.s3_signing_client.presign_get(key, 3600, None).await.ok()
@@ -310,6 +367,8 @@ async fn list_items(
             "width": meta.get("width"),
             "height": meta.get("height"),
             "source_url": source_url,
+            "tags": tags,
+            "tag_objects": tag_objects,
         }));
     }
 
@@ -357,6 +416,11 @@ async fn get_item(
             let processed_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("processed_at").ok();
             let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
             let tags: Vec<i32> = row.try_get("tags").unwrap_or_default();
+            let tags_map = fetch_tags_map(&state, &tags).await;
+            let tag_objects: Vec<serde_json::Value> = tags
+                .iter()
+                .filter_map(|id| tags_map.get(id).cloned())
+                .collect();
 
             let s3_url = if let Some(key) = s3_key.as_ref() {
                 state.s3_signing_client.presign_get(key, 3600, None).await.ok()
@@ -393,6 +457,7 @@ async fn get_item(
                 "processed_at": processed_at,
                 "meta": meta,
                 "tags": tags,
+                "tag_objects": tag_objects,
             })))
         }
         None => Err(StatusCode::NOT_FOUND),
@@ -622,6 +687,18 @@ async fn search_items(
         })?;
     
     let mut items = Vec::new();
+
+    let mut unique_tag_ids: HashSet<i32> = HashSet::new();
+    for row in &rows {
+        let ids: Vec<i32> = row.try_get("tags").unwrap_or_default();
+        for id in ids {
+            unique_tag_ids.insert(id);
+        }
+    }
+    let mut unique_tag_ids_vec: Vec<i32> = unique_tag_ids.into_iter().collect();
+    unique_tag_ids_vec.sort_unstable();
+    let tags_map = fetch_tags_map(&state, &unique_tag_ids_vec).await;
+
     for row in &rows {
         let id: i64 = row.get("id");
         let item_type: String = row.get("item_type");
@@ -638,6 +715,11 @@ async fn search_items(
         let thumbnail_key: Option<String> = row.get("thumbnail_key");
         let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
         let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
+        let tags: Vec<i32> = row.try_get("tags").unwrap_or_default();
+        let tag_objects: Vec<serde_json::Value> = tags
+            .iter()
+            .filter_map(|id| tags_map.get(id).cloned())
+            .collect();
 
         let s3_url = if let Some(key) = s3_key.as_ref() {
             state.s3_signing_client.presign_get(key, 3600, None).await.ok()
@@ -660,6 +742,8 @@ async fn search_items(
             "created_at": created_at,
             "width": meta.get("width"),
             "height": meta.get("height"),
+            "tags": tags,
+            "tag_objects": tag_objects,
         }));
     }
 
@@ -667,6 +751,143 @@ async fn search_items(
         "items": items,
         "total": items.len()
     })))
+}
+
+// ============ Tags API ============
+
+async fn list_tags(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, icon_type, icon_value, label, asset_url, asset_mime
+        FROM tags
+        ORDER BY id ASC
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to list tags: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut tags = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: i32 = row.get("id");
+        let icon_type: String = row.get("icon_type");
+        let icon_value: String = row.get("icon_value");
+        let label: Option<String> = row.try_get("label").ok();
+        let asset_url_raw: Option<String> = row.try_get("asset_url").ok();
+        let asset_mime: Option<String> = row.try_get("asset_mime").ok();
+
+        let asset_url = resolve_proxy_url(&state, asset_url_raw).await;
+
+        tags.push(json!({
+            "id": id,
+            "icon_type": icon_type,
+            "icon_value": icon_value,
+            "label": label,
+            "asset_url": asset_url,
+            "asset_mime": asset_mime,
+        }));
+    }
+
+    Ok(Json(json!({ "tags": tags })))
+}
+
+async fn create_tag(
+    State(state): State<AppState>,
+    Json(req): Json<CreateTagRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let icon_type = req.icon_type.trim().to_string();
+    let icon_value = req.icon_value.trim().to_string();
+
+    if icon_type != "emoji" && icon_type != "tmoji" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if icon_value.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let row = sqlx::query(
+        r#"
+        INSERT INTO tags (icon_type, icon_value, label)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (icon_type, icon_value)
+        DO UPDATE SET label = COALESCE(EXCLUDED.label, tags.label)
+        RETURNING id
+        "#,
+    )
+    .bind(&icon_type)
+    .bind(&icon_value)
+    .bind(req.label.as_deref())
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to create tag: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let id: i32 = row.get("id");
+    Ok(Json(json!({ "id": id })))
+}
+
+async fn update_tag(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    Json(req): Json<UpdateTagRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    sqlx::query("UPDATE tags SET label = $1 WHERE id = $2")
+        .bind(req.label.as_deref())
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to update tag {}: {}", id, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(json!({ "success": true })))
+}
+
+async fn delete_tag(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let mut tx = state.db.begin().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    sqlx::query(
+        r#"
+        UPDATE items
+        SET tags = array_remove(tags, $1)
+        WHERE tags @> ARRAY[$1]::int[]
+        "#,
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to detach tag {}: {}", id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let result = sqlx::query("DELETE FROM tags WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to delete tag {}: {}", id, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if result.rows_affected() == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    Ok(Json(json!({ "success": true })))
 }
 
 /// 获取文本的 BGE-M3 向量（用于 text_embedding 召回）

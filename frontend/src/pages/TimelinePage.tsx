@@ -37,7 +37,7 @@ export const TimelinePage: React.FC = () => {
             } else {
                 // Normal timeline
                 const cursorSnapshot = reset ? null : cursor;
-                const data = await fetchItems(cursorSnapshot, 'timeline', undefined, controller.signal);
+                const data = await fetchItems(cursorSnapshot, 'timeline', undefined, null, controller.signal);
 
                 if (requestSeqRef.current !== requestSeq) return;
                 setItems(prev => reset ? data.items : [...prev, ...data.items]);

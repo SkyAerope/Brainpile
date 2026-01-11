@@ -132,9 +132,25 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 4px;
   font-size: 11px;
   color: #5f5f5f;
+}
+
+.item-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
 }
 
 .type-badge {
@@ -242,10 +258,6 @@
 
 .item-card.type-text .item-content {
   padding: 8px 4px 0 4px;
-}
-
-.item-card.type-text .item-meta {
-  margin-top: 4px;
 }
 
 /* 针对纯图片（无 content）的处理 */
