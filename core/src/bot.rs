@@ -52,18 +52,17 @@ fn diff_reactions(old_reaction: &[ReactionType], new_reaction: &[ReactionType]) 
     (added, removed)
 }
 
-async fn resolve_item_id_by_bot_message(
+async fn resolve_task_by_bot_message(
     state: &AppState,
     chat_id: i64,
     message_id: i64,
-) -> anyhow::Result<Option<i64>> {
-    let item_id: Option<i64> = sqlx::query_scalar(
+) -> anyhow::Result<Option<(i64, Option<i64>, Option<String>, serde_json::Value)>> {
+    let row = sqlx::query(
         r#"
-        SELECT item_id
+        SELECT id, item_id, payload
         FROM tasks
         WHERE bot_chat_id = $1
           AND bot_message_id = $2
-          AND item_id IS NOT NULL
         ORDER BY id DESC
         LIMIT 1
         "#,
@@ -71,10 +70,138 @@ async fn resolve_item_id_by_bot_message(
     .bind(chat_id)
     .bind(message_id)
     .fetch_optional(&state.db)
+    .await?;
+
+    let Some(row) = row else { return Ok(None); };
+    let id: i64 = row.get("id");
+    let item_id: Option<i64> = row.try_get("item_id").ok();
+    let payload: serde_json::Value = row
+        .try_get::<Option<serde_json::Value>, _>("payload")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let group_id = payload
+        .get("tg_group_id")
+        .and_then(|v| match v {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        });
+
+    Ok(Some((id, item_id, group_id, payload)))
+}
+
+async fn resolve_tasks_by_album(
+    state: &AppState,
+    chat_id: i64,
+    group_id: &str,
+) -> anyhow::Result<Vec<(i64, Option<i64>, serde_json::Value)>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, item_id, COALESCE(payload, '{}'::jsonb) AS payload
+        FROM tasks
+        WHERE bot_chat_id = $1
+          AND payload->>'tg_group_id' = $2
+        ORDER BY bot_message_id ASC
+        "#,
+    )
+    .bind(chat_id)
+    .bind(group_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: i64 = row.get("id");
+        let item_id: Option<i64> = row.try_get("item_id").ok();
+        let payload: serde_json::Value = row.get("payload");
+        out.push((id, item_id, payload));
+    }
+    Ok(out)
+}
+
+fn add_tag_id_to_payload(mut payload: serde_json::Value, tag_id: i32) -> serde_json::Value {
+    if !payload.is_object() {
+        payload = serde_json::json!({});
+    }
+
+    let arr = payload
+        .get("tag_ids")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut next: Vec<i32> = arr
+        .into_iter()
+        .filter_map(|v| v.as_i64().and_then(|n| i32::try_from(n).ok()))
+        .collect();
+
+    if !next.contains(&tag_id) {
+        next.push(tag_id);
+    }
+
+    payload["tag_ids"] = serde_json::Value::Array(
+        next.into_iter()
+            .map(|n| serde_json::Value::Number(serde_json::Number::from(n)))
+            .collect(),
+    );
+    payload
+}
+
+fn remove_tag_id_from_payload(mut payload: serde_json::Value, tag_id: i32) -> serde_json::Value {
+    if !payload.is_object() {
+        payload = serde_json::json!({});
+    }
+
+    let arr = payload
+        .get("tag_ids")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let next: Vec<serde_json::Value> = arr
+        .into_iter()
+        .filter(|v| v.as_i64().and_then(|n| i32::try_from(n).ok()) != Some(tag_id))
+        .collect();
+
+    if next.is_empty() {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.remove("tag_ids");
+        }
+    } else {
+        payload["tag_ids"] = serde_json::Value::Array(next);
+    }
+
+    payload
+}
+
+async fn update_task_payload(state: &AppState, task_id: i64, payload: serde_json::Value) -> anyhow::Result<()> {
+    sqlx::query("UPDATE tasks SET payload = $1, updated_at = NOW() WHERE id = $2")
+        .bind(payload)
+        .bind(task_id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+async fn is_album_reaction_leader(state: &AppState, chat_id: i64, message_id: i64, group_id: &str) -> anyhow::Result<bool> {
+    let min_id: Option<i64> = sqlx::query_scalar(
+        r#"
+        SELECT bot_message_id
+        FROM tasks
+        WHERE bot_chat_id = $1
+          AND payload->>'tg_group_id' = $2
+        ORDER BY bot_message_id ASC
+        LIMIT 1
+        "#,
+    )
+    .bind(chat_id)
+    .bind(group_id)
+    .fetch_optional(&state.db)
     .await?
     .flatten();
 
-    Ok(item_id)
+    Ok(min_id.map(|v| v == message_id).unwrap_or(true))
 }
 
 async fn upsert_tag_id(
@@ -196,15 +323,6 @@ async fn attach_tag_to_item(state: &AppState, item_id: i64, tag_id: i32) -> anyh
     Ok(())
 }
 
-async fn detach_tag_from_item(state: &AppState, item_id: i64, tag_id: i32) -> anyhow::Result<()> {
-    sqlx::query("UPDATE items SET tags = array_remove(tags, $1) WHERE id = $2")
-        .bind(tag_id)
-        .bind(item_id)
-        .execute(&state.db)
-        .await?;
-    Ok(())
-}
-
 async fn process_message_reaction(
     bot: Bot,
     reaction: MessageReactionUpdated,
@@ -221,16 +339,18 @@ async fn process_message_reaction(
     let chat_id = reaction.chat.id.0;
     let message_id = reaction.message_id.0 as i64;
 
-    let Some(item_id) = resolve_item_id_by_bot_message(&state, chat_id, message_id)
+    let Some((task_id, item_id, group_id, task_payload)) = resolve_task_by_bot_message(&state, chat_id, message_id)
         .await
         .ok()
         .flatten() else {
-        tracing::debug!(
-            "No item_id mapped for reaction chat_id={}, message_id={} (task missing or item not ready)",
-            chat_id,
-            message_id
-        );
+        tracing::debug!("No task mapped for reaction chat_id={}, message_id={}", chat_id, message_id);
         return Ok(());
+    };
+
+    let mut affected_tasks: Vec<(i64, Option<i64>, serde_json::Value)> = if let Some(gid) = group_id.as_deref() {
+        resolve_tasks_by_album(&state, chat_id, gid).await.unwrap_or_default()
+    } else {
+        vec![(task_id, item_id, task_payload)]
     };
 
     let (added, removed) = diff_reactions(&reaction.old_reaction, &reaction.new_reaction);
@@ -251,8 +371,22 @@ async fn process_message_reaction(
             }
         }
 
-        if let Err(e) = attach_tag_to_item(&state, item_id, tag_id).await {
-            tracing::warn!("Failed to attach tag {} to item {}: {}", tag_id, item_id, e);
+        // Persist tag intent to tasks payload so album members that are still processing
+        // will inherit it once their items are created.
+        for (tid, _, payload) in &mut affected_tasks {
+            let next = add_tag_id_to_payload(payload.clone(), tag_id);
+            *payload = next;
+            if let Err(e) = update_task_payload(&state, *tid, payload.clone()).await {
+                tracing::warn!("Failed to update task payload for tag: task_id={}, err={}", tid, e);
+            }
+        }
+
+        // Apply to all existing items in the album.
+        let item_ids: Vec<i64> = affected_tasks.iter().filter_map(|(_, iid, _)| *iid).collect();
+        for iid in item_ids {
+            if let Err(e) = attach_tag_to_item(&state, iid, tag_id).await {
+                tracing::warn!("Failed to attach tag {} to item {}: {}", tag_id, iid, e);
+            }
         }
     }
 
@@ -269,8 +403,25 @@ async fn process_message_reaction(
         .flatten();
 
         let Some(tag_id) = tag_id else { continue; };
-        if let Err(e) = detach_tag_from_item(&state, item_id, tag_id).await {
-            tracing::warn!("Failed to detach tag {} from item {}: {}", tag_id, item_id, e);
+
+        for (tid, _, payload) in &mut affected_tasks {
+            let next = remove_tag_id_from_payload(payload.clone(), tag_id);
+            *payload = next;
+            if let Err(e) = update_task_payload(&state, *tid, payload.clone()).await {
+                tracing::warn!("Failed to update task payload for tag removal: task_id={}, err={}", tid, e);
+            }
+        }
+
+        let item_ids: Vec<i64> = affected_tasks.iter().filter_map(|(_, iid, _)| *iid).collect();
+        if !item_ids.is_empty() {
+            if let Err(e) = sqlx::query("UPDATE items SET tags = array_remove(tags, $1) WHERE id = ANY($2)")
+                .bind(tag_id)
+                .bind(&item_ids)
+                .execute(&state.db)
+                .await
+            {
+                tracing::warn!("Failed to detach tag {} from album items: {}", tag_id, e);
+            }
         }
     }
 
@@ -330,16 +481,6 @@ async fn update_entity_avatar(bot: Bot, state: AppState, id: i64, name: String) 
 
 async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseResult<()> {
     tracing::info!("Received message: {} from chat {}", msg.id, msg.chat.id);
-
-    // 1. React with eyes 👀 (processing)
-    let reaction = ReactionType::Emoji { emoji: "👀".to_string() };
-    if let Err(e) = bot.set_message_reaction(msg.chat.id, msg.id)
-        .reaction(vec![reaction])
-        .send()
-        .await 
-    {
-        tracing::warn!("Failed to set reaction: {}", e);
-    }
     
     // 如果是转发消息，尝试获取并更新来源实体的头像
     if let Some(origin) = msg.forward_origin() {
@@ -547,6 +688,26 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
         Err(e) => {
             tracing::error!("Failed to persist task: {}", e);
             let _ = bot.send_message(msg.chat.id, "System Error: Failed to queue task.").await;
+        }
+    }
+
+    // React with eyes 👀 (processing) - for albums, only react on the leader message
+    let should_react = match tg_group_id.as_deref() {
+        Some(gid) => is_album_reaction_leader(&state, bot_chat_id, bot_message_id, gid)
+            .await
+            .unwrap_or(true),
+        None => true,
+    };
+
+    if should_react {
+        let reaction = ReactionType::Emoji { emoji: "👀".to_string() };
+        if let Err(e) = bot
+            .set_message_reaction(msg.chat.id, msg.id)
+            .reaction(vec![reaction])
+            .send()
+            .await
+        {
+            tracing::warn!("Failed to set reaction: {}", e);
         }
     }
 

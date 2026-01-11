@@ -11,6 +11,110 @@ use std::process::Stdio;
 use futures::FutureExt;
 use tokio::process::Command;
 
+fn payload_group_id_str(payload: &serde_json::Value) -> Option<String> {
+    payload.get("tg_group_id").and_then(|v| match v {
+        serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    })
+}
+
+async fn update_album_reaction(
+    state: &AppState,
+    bot: &Bot,
+    bot_chat_id: i64,
+    group_id: &str,
+) -> anyhow::Result<()> {
+    let row = sqlx::query(
+        r#"
+        SELECT
+            MIN(bot_message_id) AS leader_message_id,
+            COUNT(*)::bigint AS cnt,
+            BOOL_OR(status = 'failed') AS any_failed,
+            BOOL_AND(status = 'completed') AS all_completed
+        FROM tasks
+        WHERE bot_chat_id = $1
+          AND payload->>'tg_group_id' = $2
+        "#,
+    )
+    .bind(bot_chat_id)
+    .bind(group_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    let leader_message_id: Option<i64> = row.try_get("leader_message_id").ok();
+    let cnt: i64 = row.try_get::<i64, _>("cnt").unwrap_or(0);
+    let any_failed: bool = row.try_get::<Option<bool>, _>("any_failed").ok().flatten().unwrap_or(false);
+    let all_completed: bool = row.try_get::<Option<bool>, _>("all_completed").ok().flatten().unwrap_or(false);
+
+    let Some(leader_message_id) = leader_message_id else { return Ok(()); };
+    if cnt <= 0 {
+        return Ok(());
+    }
+
+    // Policy:
+    // - Any failed => 👎 immediately
+    // - All completed => ❤️
+    // - Otherwise keep existing 👀 (do nothing)
+    let emoji = if any_failed {
+        Some("👎")
+    } else if all_completed {
+        Some("❤️")
+    } else {
+        None
+    };
+
+    let Some(emoji) = emoji else { return Ok(()); };
+    let chat_id = teloxide::types::ChatId(bot_chat_id);
+    let message_id = teloxide::types::MessageId(leader_message_id as i32);
+    let reaction = ReactionType::Emoji { emoji: emoji.to_string() };
+    let _ = bot
+        .set_message_reaction(chat_id, message_id)
+        .reaction(vec![reaction])
+        .send()
+        .await;
+
+    Ok(())
+}
+
+fn payload_tag_ids(payload: &serde_json::Value) -> Vec<i32> {
+    payload
+        .get("tag_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_i64().and_then(|n| i32::try_from(n).ok()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+async fn apply_tag_ids_to_item(state: &AppState, item_id: i64, tag_ids: &[i32]) -> anyhow::Result<()> {
+    if tag_ids.is_empty() {
+        return Ok(());
+    }
+
+    // Dedup in DB by constructing a distinct array.
+    sqlx::query(
+        r#"
+        UPDATE items i
+        SET tags = (
+            SELECT ARRAY(
+                SELECT DISTINCT t
+                FROM unnest(COALESCE(i.tags, '{}'::int[]) || $1::int[]) AS t
+            )
+        )
+        WHERE i.id = $2
+        "#,
+    )
+    .bind(tag_ids)
+    .bind(item_id)
+    .execute(&state.db)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn run_worker(state: AppState) {
     tracing::info!("Worker pipeline started.");
 
@@ -93,7 +197,7 @@ async fn process_next_task(state: &AppState, bucket: &Bucket) -> anyhow::Result<
     
     tracing::info!("Processing task #{}", task_id);
     
-    let result = match AssertUnwindSafe(perform_task(state, bucket, bot_chat_id, bot_message_id, source_chat_id, source_message_id, source_user_id, payload)).catch_unwind().await {
+    let result = match AssertUnwindSafe(perform_task(state, bucket, bot_chat_id, bot_message_id, source_chat_id, source_message_id, source_user_id, payload.clone())).catch_unwind().await {
         Ok(res) => res,
         Err(payload) => {
             let msg = if let Some(s) = payload.downcast_ref::<&str>() {
@@ -128,12 +232,20 @@ async fn process_next_task(state: &AppState, bucket: &Bucket) -> anyhow::Result<
                 .execute(&state.db)
                 .await?;
             
-            // 设置成功 Reaction
-            let reaction = ReactionType::Emoji { emoji: "❤️".to_string() };
-            let _ = bot.set_message_reaction(chat_id, message_id)
-                .reaction(vec![reaction])
-                .send()
-                .await;
+            // Reaction policy for albums:
+            // - ❤️ only when the whole album has completed
+            // - 👎 if any member failed
+            // - otherwise keep 👀 (do nothing)
+            if let Some(gid) = payload_group_id_str(&payload) {
+                let _ = update_album_reaction(state, &bot, bot_chat_id, &gid).await;
+            } else {
+                let reaction = ReactionType::Emoji { emoji: "❤️".to_string() };
+                let _ = bot
+                    .set_message_reaction(chat_id, message_id)
+                    .reaction(vec![reaction])
+                    .send()
+                    .await;
+            }
             
             // 删除之前的错误回复消息（如果有）
             if let Some(Some(reply_id)) = prev_error_reply {
@@ -143,12 +255,16 @@ async fn process_next_task(state: &AppState, bucket: &Bucket) -> anyhow::Result<
         Err(e) => {
             tracing::error!("Task #{} failed: {}", task_id, e);
             
-            // 设置失败 Reaction
-            let reaction = ReactionType::Emoji { emoji: "👎".to_string() };
-            let _ = bot.set_message_reaction(chat_id, message_id)
-                .reaction(vec![reaction])
-                .send()
-                .await;
+            if let Some(gid) = payload_group_id_str(&payload) {
+                let _ = update_album_reaction(state, &bot, bot_chat_id, &gid).await;
+            } else {
+                let reaction = ReactionType::Emoji { emoji: "👎".to_string() };
+                let _ = bot
+                    .set_message_reaction(chat_id, message_id)
+                    .reaction(vec![reaction])
+                    .send()
+                    .await;
+            }
             
             // 查询是否已有错误回复消息
             let prev_error_reply: Option<i64> = sqlx::query_scalar::<_, Option<i64>>(
@@ -514,5 +630,11 @@ async fn perform_task(
     .fetch_one(&state.db)
     .await?;
 
-    Ok(rec.get("id"))
+    let item_id: i64 = rec.get("id");
+    let tag_ids = payload_tag_ids(&payload);
+    if let Err(e) = apply_tag_ids_to_item(state, item_id, &tag_ids).await {
+        tracing::warn!("Failed to apply inherited tags to item {}: {}", item_id, e);
+    }
+
+    Ok(item_id)
 }
