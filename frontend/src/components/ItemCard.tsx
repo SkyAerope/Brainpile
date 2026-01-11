@@ -132,7 +132,7 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
                         </button>
                         <button 
                             className="dropdown-item delete" 
-                            style={{ color: '#e60023' }}
+                            style={{ color: '#ff4d4f' }}
                             onClick={(e) => {
                                 e.stopPropagation();
                                 setShowConfirm(true);

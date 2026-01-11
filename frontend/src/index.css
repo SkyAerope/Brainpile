@@ -3,7 +3,7 @@
   --card-bg: #ffffff;
   --text-primary: #111111;
   --text-secondary: #5f5f5f;
-  --accent-color: #e60023; /* Pinterest Red */
+  --accent-color: #7d9a88; /* Sage Green */
   --border-color: #efefef;
 }
 
@@ -39,7 +39,6 @@ body {
 }
 
 .sidebar-logo {
-  color: #e60023;
   margin-bottom: 24px;
 }
 
@@ -117,7 +116,7 @@ body {
 }
 
 .search-container:focus-within {
-  box-shadow: 0 0 0 4px rgba(0, 132, 255, 0.2);
+  box-shadow: 0 0 0 4px rgba(125, 154, 136, 0.2);
 }
 
 .search-icon {

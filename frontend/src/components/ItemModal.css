@@ -177,12 +177,12 @@
 }
 
 .btn-delete {
-    background-color: #e60023; /* Pinterest Red */
+    background-color: #ff4d4f; /* Danger Red */
     color: white;
 }
 
 .btn-delete:hover {
-    background-color: #ad081b;
+    background-color: #d9363e;
 }
 
 .btn-secondary {

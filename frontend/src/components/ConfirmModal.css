@@ -67,7 +67,7 @@
 }
 
 .danger-icon {
-  color: #e60023;
+  color: #ff4d4f;
 }
 
 .confirm-modal-body p {
@@ -116,9 +116,9 @@
 }
 
 .btn-confirm.danger {
-  background: #e60023;
+  background: #ff4d4f;
 }
 
 .btn-confirm.danger:hover {
-  background: #ad081b;
+  background: #d9363e;
 }

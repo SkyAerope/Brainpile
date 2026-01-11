@@ -15,7 +15,7 @@
 
 .sidebar-logo {
   margin-bottom: 24px;
-  color: #e60023; /* Pinterest Red */
+  color: var(--accent-color);
 }
 
 .sidebar-nav {

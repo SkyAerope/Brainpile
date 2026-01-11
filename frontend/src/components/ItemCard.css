@@ -1,7 +1,7 @@
-/* Pinterest-like Card Styles */
+/* Card Styles */
 
 .item-card {
-  /* Transparent bg for the card container itself, similar to Pinterest */
+  /* Transparent bg for the card container itself */
   background: transparent;
   border-radius: 0;
   overflow: visible;
@@ -17,7 +17,7 @@
 .item-media {
   position: relative;
   width: 100%;
-  border-radius: 16px; /* Pinterest standard is roughly 16px */
+  border-radius: 16px;
   overflow: hidden;
   background: #f5f5f5; /* Light gray background to show through white/transparent images */
   will-change: transform;
@@ -69,8 +69,8 @@
 }
 
 .view-btn {
-  align-self: flex-end; /* Top-right usually "Save" on Pinterest */
-  background: #e60023; /* Pinterest Red */
+  align-self: flex-end;
+  background: var(--accent-color);
   color: white;
   border: none;
   border-radius: 24px;
