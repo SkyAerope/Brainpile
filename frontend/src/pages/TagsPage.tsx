@@ -29,6 +29,123 @@ function useElementSize<T extends HTMLElement>() {
   return { ref, ...size };
 }
 
+type TagRowProps = {
+  tags: Tag[];
+  selectedTagId: number | null;
+  onSelectTag: (id: number) => void;
+  editingTagId: number | null;
+  editLabel: string;
+  setEditingTagId: (id: number | null) => void;
+  setEditLabel: (label: string) => void;
+  handleSaveLabel: () => void;
+  setTagToDelete: (tag: Tag | null) => void;
+  setShowDeleteConfirm: (show: boolean) => void;
+};
+
+const TagRow = ({
+  ariaAttributes,
+  index,
+  style,
+  tags: rowTags,
+  selectedTagId: rowSelectedTagId,
+  onSelectTag,
+  editingTagId: rowEditingTagId,
+  editLabel: rowEditLabel,
+  setEditingTagId: rowSetEditingTagId,
+  setEditLabel: rowSetEditLabel,
+  handleSaveLabel: rowHandleSaveLabel,
+  setTagToDelete: rowSetTagToDelete,
+  setShowDeleteConfirm: rowSetShowDeleteConfirm,
+}: RowComponentProps<TagRowProps>): React.ReactElement => {
+  const tag = rowTags[index];
+  if (!tag) return <div style={style} {...ariaAttributes} />;
+
+  const isEditing = rowEditingTagId === tag.id;
+
+  return (
+    <div style={style} {...ariaAttributes}>
+      <div style={{ padding: '0 12px', paddingBottom: '4px' }}>
+        <div
+          className={`entity-item ${rowSelectedTagId === tag.id ? 'active' : ''}`}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            if (isEditing) return;
+
+            // When an input is active, mouse down happens before input blur.
+            // Selecting here avoids the click being lost due to re-render during save.
+            if (rowEditingTagId !== null) {
+              rowHandleSaveLabel();
+            }
+            onSelectTag(tag.id);
+          }}
+        >
+          <div className="entity-avatar">
+            <TagIcon tag={tag} size={22} title={tag.label ?? undefined} />
+          </div>
+          <div className="entity-info">
+            <div className="entity-header-row">
+              {isEditing ? (
+                <input
+                  autoFocus
+                  value={rowEditLabel}
+                  onChange={(e) => rowSetEditLabel(e.target.value)}
+                  onBlur={(e) => {
+                    // 只有当焦点离开到非 entity-item 的地方时才这里处理
+                    // 否则让 entity-item 的 onMouseDown 处理，避免竞争
+                    const relatedTarget = e.relatedTarget as HTMLElement;
+                    if (!relatedTarget?.closest('.entity-item')) {
+                      rowHandleSaveLabel();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') rowHandleSaveLabel();
+                    if (e.key === 'Escape') rowSetEditingTagId(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="inline-edit-input"
+                />
+              ) : (
+                <div className="entity-name">{tag.label?.trim() ? tag.label : '(no label)'}</div>
+              )}
+            </div>
+            <div className="entity-meta">
+              {tag.icon_type === 'emoji' ? `emoji: ${tag.icon_value}` : `tmoji: ${tag.icon_value}`}
+            </div>
+          </div>
+
+          {!isEditing && (
+            <div className="entity-actions">
+              <button
+                className="entity-action-btn"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  rowSetEditingTagId(tag.id);
+                  rowSetEditLabel(tag.label ?? '');
+                }}
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                className="entity-action-btn danger"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  rowSetTagToDelete(tag);
+                  rowSetShowDeleteConfirm(true);
+                }}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const TagsPage: React.FC = () => {
   const [tags, setTags] = useState<Tag[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
@@ -47,6 +164,7 @@ export const TagsPage: React.FC = () => {
 
   const [editLabel, setEditLabel] = useState<string>('');
   const [editBusy, setEditBusy] = useState(false);
+  const editBusyRef = useRef(false);
   const [editingTagId, setEditingTagId] = useState<number | null>(null);
   const [tagToDelete, setTagToDelete] = useState<Tag | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -141,7 +259,7 @@ export const TagsPage: React.FC = () => {
 
   const handleSaveLabel = useCallback(async () => {
     if (editingTagId === null) return;
-    if (editBusy) return;
+    if (editBusyRef.current) return;
 
     const tagToUpdate = tags.find((t) => t.id === editingTagId);
     if (!tagToUpdate) {
@@ -155,15 +273,18 @@ export const TagsPage: React.FC = () => {
       return;
     }
 
+    editBusyRef.current = true;
     setEditBusy(true);
+    const idToUpdate = tagToUpdate.id; // Capture locally
     try {
-      await updateTagLabel(tagToUpdate.id, nextLabel ? nextLabel : null);
+      await updateTagLabel(idToUpdate, nextLabel ? nextLabel : null);
       await reloadTags();
     } catch (e) {
       console.error(e);
     } finally {
+      editBusyRef.current = false;
       setEditBusy(false);
-      setEditingTagId(null);
+      setEditingTagId((prev) => (prev === idToUpdate ? null : prev));
     }
   }, [editBusy, editLabel, reloadTags, editingTagId, tags]);
 
@@ -185,105 +306,6 @@ export const TagsPage: React.FC = () => {
       console.error(e);
     }
   }, [reloadTags, tagToDelete, selectedTagId]);
-
-  type TagRowProps = {
-    tags: Tag[];
-    selectedTagId: number | null;
-    onSelectTag: (id: number) => void;
-    editingTagId: number | null;
-    editLabel: string;
-    setEditingTagId: (id: number | null) => void;
-    setEditLabel: (label: string) => void;
-    handleSaveLabel: () => void;
-    setTagToDelete: (tag: Tag | null) => void;
-    setShowDeleteConfirm: (show: boolean) => void;
-  };
-
-  const TagRow = ({
-    ariaAttributes,
-    index,
-    style,
-    tags: rowTags,
-    selectedTagId: rowSelectedTagId,
-    onSelectTag,
-    editingTagId: rowEditingTagId,
-    editLabel: rowEditLabel,
-    setEditingTagId: rowSetEditingTagId,
-    setEditLabel: rowSetEditLabel,
-    handleSaveLabel: rowHandleSaveLabel,
-    setTagToDelete: rowSetTagToDelete,
-    setShowDeleteConfirm: rowSetShowDeleteConfirm,
-  }: RowComponentProps<TagRowProps>): React.ReactElement => {
-    const tag = rowTags[index];
-    if (!tag) return <div style={style} {...ariaAttributes} />;
-
-    const isEditing = rowEditingTagId === tag.id;
-
-    return (
-      <div style={style} {...ariaAttributes}>
-        <div style={{ padding: '0 12px', paddingBottom: '4px' }}>
-          <div
-            className={`entity-item ${rowSelectedTagId === tag.id ? 'active' : ''}`}
-            onClick={() => !isEditing && onSelectTag(tag.id)}
-          >
-            <div className="entity-avatar">
-              <TagIcon tag={tag} size={22} title={tag.label ?? undefined} />
-            </div>
-            <div className="entity-info">
-              {isEditing ? (
-                <input
-                  autoFocus
-                  value={rowEditLabel}
-                  onChange={(e) => rowSetEditLabel(e.target.value)}
-                  onBlur={rowHandleSaveLabel}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') rowHandleSaveLabel();
-                    if (e.key === 'Escape') rowSetEditingTagId(null);
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  className="inline-edit-input"
-                />
-              ) : (
-                <>
-                  <div className="entity-header-row">
-                    <div className="entity-name">{tag.label?.trim() ? tag.label : '(no label)'}</div>
-                  </div>
-                  <div className="entity-meta">
-                    {tag.icon_type === 'emoji' ? `emoji: ${tag.icon_value}` : `tmoji: ${tag.icon_value}`}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {!isEditing && (
-              <div className="entity-actions">
-                <button
-                  className="entity-action-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    rowSetEditingTagId(tag.id);
-                    rowSetEditLabel(tag.label ?? '');
-                  }}
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  className="entity-action-btn danger"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    rowSetTagToDelete(tag);
-                    rowSetShowDeleteConfirm(true);
-                  }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const tagRowProps = useMemo<TagRowProps>(
     () => ({
@@ -347,14 +369,15 @@ export const TagsPage: React.FC = () => {
             </div>
           ) : (
             <>
-              <div style={{ padding: '12px 0 16px 0', borderBottom: '1px solid var(--border-color)', marginBottom: 20 }}>
+              {/* 先注释掉，将来或许可以用在移动端ui？ */}
+              {/* <div style={{ padding: '12px 0 16px 0', borderBottom: '1px solid var(--border-color)', marginBottom: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <TagIcon tag={selectedTag} size={24} />
                   <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>
                     {selectedTag.label?.trim() ? selectedTag.label : selectedTag.icon_value}
                   </h1>
                 </div>
-              </div>
+              </div> */}
 
               <MasonryGrid
                 items={items}

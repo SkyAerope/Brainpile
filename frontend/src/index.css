@@ -204,13 +204,15 @@ body {
 
 .inline-edit-input {
   width: 100%;
-  padding: 4px 8px;
+  padding: 0px 0px;
   border-radius: 6px;
-  border: 1px solid #ddd;
-  background: white;
+  border: 0px solid var(--bg-color);
+  background: var(--bg-color);
   outline: none;
-  font-size: 14px;
+  font-size: 16px; 
+  font-weight: 600;
   font-family: inherit;
+  transition: background-color 0.2s;
 }
 
 /* Masonry Layout Adjustments */
@@ -309,11 +311,19 @@ body {
 }
 
 .entity-item:hover {
-  background-color: #f0f0f0;
+  background-color: var(--card-bg);
+
+  .inline-edit-input {
+    background: var(--card-bg);
+  }
 }
 
 .entity-item.active {
-  background-color: #f0f0f0;
+  background-color: var(--card-bg);
+
+  .inline-edit-input {
+    background: var(--card-bg);
+  }
 }
 
 .entity-avatar {
@@ -347,6 +357,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  height: 24px;
 }
 
 .entity-updated-at {
