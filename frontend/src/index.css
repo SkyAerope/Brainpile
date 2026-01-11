@@ -162,6 +162,57 @@ body {
   background: #f0f0f0;
 }
 
+.entity-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  transition: opacity 0.2s, width 0.2s, margin-left 0.2s;
+  flex-shrink: 0;
+}
+
+.entity-item:hover .entity-actions {
+  opacity: 1;
+  width: 68px;
+  margin-left: 12px;
+}
+
+.entity-action-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #71717a;
+  transition: background-color 0.1s, color 0.1s;
+}
+
+.entity-action-btn:hover {
+  background-color: #e4e4e7;
+  color: #18181b;
+}
+
+.entity-action-btn.danger:hover {
+  background-color: #fee2e2;
+  color: #ef4444;
+}
+
+.inline-edit-input {
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: white;
+  outline: none;
+  font-size: 14px;
+  font-family: inherit;
+}
+
 /* Masonry Layout Adjustments */
 .my-masonry-grid {
   width: 100%;
@@ -252,7 +303,6 @@ body {
   display: flex;
   align-items: center;
   padding: 12px 12px;
-  gap: 16px;
   cursor: pointer;
   border-radius: 12px;
   transition: background-color 0.2s;
@@ -276,6 +326,7 @@ body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  margin-right: 16px;
 }
 
 .entity-avatar img {
@@ -294,7 +345,7 @@ body {
 
 .entity-header-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 

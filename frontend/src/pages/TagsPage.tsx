@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { List, type RowComponentProps } from 'react-window';
+import { Pencil, Trash2 } from 'lucide-react';
 import { deleteTag, fetchItems, fetchTags, type Item, type Tag, updateTagLabel } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
@@ -46,6 +47,8 @@ export const TagsPage: React.FC = () => {
 
   const [editLabel, setEditLabel] = useState<string>('');
   const [editBusy, setEditBusy] = useState(false);
+  const [editingTagId, setEditingTagId] = useState<number | null>(null);
+  const [tagToDelete, setTagToDelete] = useState<Tag | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { ref: tagsListRef, width: tagsListWidth, height: tagsListHeight } = useElementSize<HTMLDivElement>();
@@ -74,10 +77,6 @@ export const TagsPage: React.FC = () => {
     void reloadTags();
     return () => tagsActiveRequestRef.current?.abort();
   }, [reloadTags]);
-
-  useEffect(() => {
-    setEditLabel(selectedTag?.label ?? '');
-  }, [selectedTag?.id]);
 
   const loadTagItems = useCallback(async (id: number) => {
     // toggle off
@@ -140,69 +139,178 @@ export const TagsPage: React.FC = () => {
     }
   }, [cursor, itemsLoading, selectedTagId]);
 
+  const handleSaveLabel = useCallback(async () => {
+    if (editingTagId === null) return;
+    if (editBusy) return;
+
+    const tagToUpdate = tags.find((t) => t.id === editingTagId);
+    if (!tagToUpdate) {
+      setEditingTagId(null);
+      return;
+    }
+
+    const nextLabel = editLabel.trim();
+    if (nextLabel === (tagToUpdate.label ?? '')) {
+      setEditingTagId(null);
+      return;
+    }
+
+    setEditBusy(true);
+    try {
+      await updateTagLabel(tagToUpdate.id, nextLabel ? nextLabel : null);
+      await reloadTags();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setEditBusy(false);
+      setEditingTagId(null);
+    }
+  }, [editBusy, editLabel, reloadTags, editingTagId, tags]);
+
+  const handleDeleteTag = useCallback(async () => {
+    if (!tagToDelete) return;
+    try {
+      await deleteTag(tagToDelete.id);
+      setShowDeleteConfirm(false);
+
+      if (selectedTagId === tagToDelete.id) {
+        setSelectedTagId(null);
+        setItems([]);
+        setCursor(null);
+        setSelectedItemId(null);
+      }
+      setTagToDelete(null);
+      await reloadTags();
+    } catch (e) {
+      console.error(e);
+    }
+  }, [reloadTags, tagToDelete, selectedTagId]);
+
   type TagRowProps = {
     tags: Tag[];
     selectedTagId: number | null;
     onSelectTag: (id: number) => void;
+    editingTagId: number | null;
+    editLabel: string;
+    setEditingTagId: (id: number | null) => void;
+    setEditLabel: (label: string) => void;
+    handleSaveLabel: () => void;
+    setTagToDelete: (tag: Tag | null) => void;
+    setShowDeleteConfirm: (show: boolean) => void;
   };
 
-  const TagRow = ({ ariaAttributes, index, style, tags: rowTags, selectedTagId: rowSelectedTagId, onSelectTag }: RowComponentProps<TagRowProps>): React.ReactElement => {
+  const TagRow = ({
+    ariaAttributes,
+    index,
+    style,
+    tags: rowTags,
+    selectedTagId: rowSelectedTagId,
+    onSelectTag,
+    editingTagId: rowEditingTagId,
+    editLabel: rowEditLabel,
+    setEditingTagId: rowSetEditingTagId,
+    setEditLabel: rowSetEditLabel,
+    handleSaveLabel: rowHandleSaveLabel,
+    setTagToDelete: rowSetTagToDelete,
+    setShowDeleteConfirm: rowSetShowDeleteConfirm,
+  }: RowComponentProps<TagRowProps>): React.ReactElement => {
     const tag = rowTags[index];
     if (!tag) return <div style={style} {...ariaAttributes} />;
+
+    const isEditing = rowEditingTagId === tag.id;
 
     return (
       <div style={style} {...ariaAttributes}>
         <div style={{ padding: '0 12px', paddingBottom: '4px' }}>
-          <div className={`entity-item ${rowSelectedTagId === tag.id ? 'active' : ''}`} onClick={() => onSelectTag(tag.id)}>
+          <div
+            className={`entity-item ${rowSelectedTagId === tag.id ? 'active' : ''}`}
+            onClick={() => !isEditing && onSelectTag(tag.id)}
+          >
             <div className="entity-avatar">
               <TagIcon tag={tag} size={22} title={tag.label ?? undefined} />
             </div>
             <div className="entity-info">
-              <div className="entity-header-row">
-                <div className="entity-name">{tag.label?.trim() ? tag.label : '(no label)'}</div>
-              </div>
-              <div className="entity-meta">
-                {tag.icon_type === 'emoji' ? `emoji: ${tag.icon_value}` : `tmoji: ${tag.icon_value}`}
-              </div>
+              {isEditing ? (
+                <input
+                  autoFocus
+                  value={rowEditLabel}
+                  onChange={(e) => rowSetEditLabel(e.target.value)}
+                  onBlur={rowHandleSaveLabel}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') rowHandleSaveLabel();
+                    if (e.key === 'Escape') rowSetEditingTagId(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-edit-input"
+                />
+              ) : (
+                <>
+                  <div className="entity-header-row">
+                    <div className="entity-name">{tag.label?.trim() ? tag.label : '(no label)'}</div>
+                  </div>
+                  <div className="entity-meta">
+                    {tag.icon_type === 'emoji' ? `emoji: ${tag.icon_value}` : `tmoji: ${tag.icon_value}`}
+                  </div>
+                </>
+              )}
             </div>
+
+            {!isEditing && (
+              <div className="entity-actions">
+                <button
+                  className="entity-action-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    rowSetEditingTagId(tag.id);
+                    rowSetEditLabel(tag.label ?? '');
+                  }}
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  className="entity-action-btn danger"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    rowSetTagToDelete(tag);
+                    rowSetShowDeleteConfirm(true);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
   };
 
-  const tagRowProps = useMemo<TagRowProps>(() => ({ tags, selectedTagId, onSelectTag: loadTagItems }), [tags, selectedTagId, loadTagItems]);
-
-  const handleSaveLabel = useCallback(async () => {
-    if (!selectedTag) return;
-    if (editBusy) return;
-
-    const nextLabel = editLabel.trim();
-    setEditBusy(true);
-    try {
-      await updateTagLabel(selectedTag.id, nextLabel ? nextLabel : null);
-      await reloadTags();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setEditBusy(false);
-    }
-  }, [editBusy, editLabel, reloadTags, selectedTag]);
-
-  const handleDeleteTag = useCallback(async () => {
-    if (!selectedTag) return;
-    try {
-      await deleteTag(selectedTag.id);
-      setShowDeleteConfirm(false);
-      setSelectedTagId(null);
-      setItems([]);
-      setCursor(null);
-      setSelectedItemId(null);
-      await reloadTags();
-    } catch (e) {
-      console.error(e);
-    }
-  }, [reloadTags, selectedTag]);
+  const tagRowProps = useMemo<TagRowProps>(
+    () => ({
+      tags,
+      selectedTagId,
+      onSelectTag: loadTagItems,
+      editingTagId,
+      editLabel,
+      setEditingTagId,
+      setEditLabel,
+      handleSaveLabel,
+      setTagToDelete,
+      setShowDeleteConfirm,
+    }),
+    [
+      tags,
+      selectedTagId,
+      loadTagItems,
+      editingTagId,
+      editLabel,
+      setEditingTagId,
+      setEditLabel,
+      handleSaveLabel,
+      setTagToDelete,
+      setShowDeleteConfirm,
+    ]
+  );
 
   return (
     <div className="entities-page-layout">
@@ -239,32 +347,13 @@ export const TagsPage: React.FC = () => {
             </div>
           ) : (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0 16px 0' }}>
-                <div style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <TagIcon tag={selectedTag} size={22} title={selectedTag.label ?? undefined} />
+              <div style={{ padding: '12px 0 16px 0', borderBottom: '1px solid var(--border-color)', marginBottom: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <TagIcon tag={selectedTag} size={24} />
+                  <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>
+                    {selectedTag.label?.trim() ? selectedTag.label : selectedTag.icon_value}
+                  </h1>
                 </div>
-
-                <input
-                  value={editLabel}
-                  onChange={(e) => setEditLabel(e.target.value)}
-                  placeholder="label"
-                  style={{
-                    flex: 1,
-                    padding: '10px 12px',
-                    borderRadius: 12,
-                    border: '1px solid var(--border-color)',
-                    background: '#efefef',
-                    outline: 'none',
-                  }}
-                />
-
-                <button className="btn" onClick={handleSaveLabel} disabled={editBusy}>
-                  Save
-                </button>
-
-                <button className="btn btn-secondary" onClick={() => setShowDeleteConfirm(true)}>
-                  Delete
-                </button>
               </div>
 
               <MasonryGrid
@@ -292,14 +381,17 @@ export const TagsPage: React.FC = () => {
         />
       )}
 
-      {showDeleteConfirm && selectedTag && (
+      {showDeleteConfirm && tagToDelete && (
         <ConfirmModal
           title="Delete Tag"
-          message={`Delete tag "${selectedTag.label?.trim() ? selectedTag.label : selectedTag.icon_value}"? This does not edit existing items yet.`}
+          message={`Delete tag "${tagToDelete.label?.trim() ? tagToDelete.label : tagToDelete.icon_value}"? This does not edit existing items yet.`}
           confirmLabel="Delete"
           isDanger
           onConfirm={handleDeleteTag}
-          onCancel={() => setShowDeleteConfirm(false)}
+          onCancel={() => {
+            setShowDeleteConfirm(false);
+            setTagToDelete(null);
+          }}
         />
       )}
     </div>
