@@ -6,6 +6,7 @@ import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
 import { TagIcon } from '../components/TagIcon';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { groupItemsForGrid } from '../groupItems';
 
 function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
@@ -154,7 +155,11 @@ export const TagsPage: React.FC = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
   const [itemsLoading, setItemsLoading] = useState(false);
-  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [selected, setSelected] = useState<{
+    itemId: number;
+    groupItems?: Item[];
+    startIndex?: number;
+  } | null>(null);
 
   const tagsRequestSeqRef = useRef(0);
   const tagsActiveRequestRef = useRef<AbortController | null>(null);
@@ -172,6 +177,7 @@ export const TagsPage: React.FC = () => {
   const { ref: tagsListRef, width: tagsListWidth, height: tagsListHeight } = useElementSize<HTMLDivElement>();
 
   const selectedTag = useMemo(() => tags.find((t) => t.id === selectedTagId) ?? null, [tags, selectedTagId]);
+  const groupedItems = useMemo(() => groupItemsForGrid(items), [items]);
 
   const reloadTags = useCallback(async () => {
     const requestSeq = (tagsRequestSeqRef.current += 1);
@@ -205,7 +211,7 @@ export const TagsPage: React.FC = () => {
       setSelectedTagId(null);
       setItems([]);
       setCursor(null);
-      setSelectedItemId(null);
+      setSelected(null);
       return;
     }
 
@@ -218,7 +224,7 @@ export const TagsPage: React.FC = () => {
     setSelectedTagId(id);
     setItems([]);
     setCursor(null);
-    setSelectedItemId(null);
+    setSelected(null);
 
     try {
       const data = await fetchItems(null, 'timeline', null, id, controller.signal);
@@ -298,7 +304,7 @@ export const TagsPage: React.FC = () => {
         setSelectedTagId(null);
         setItems([]);
         setCursor(null);
-        setSelectedItemId(null);
+        setSelected(null);
       }
       setTagToDelete(null);
       await reloadTags();
@@ -380,9 +386,9 @@ export const TagsPage: React.FC = () => {
               </div> */}
 
               <MasonryGrid
-                items={items}
+                items={groupedItems}
                 layoutKey={`tag:${selectedTag.id}`}
-                onItemClick={(item) => setSelectedItemId(item.id)}
+                onItemClick={(item, opts) => setSelected({ itemId: item.id, groupItems: item.group_items, startIndex: opts?.startIndex })}
                 onItemDelete={(id) => setItems((prev) => prev.filter((it) => it.id !== id))}
                 loading={itemsLoading}
                 hasMore={!!cursor}
@@ -393,13 +399,15 @@ export const TagsPage: React.FC = () => {
         </div>
       </div>
 
-      {selectedItemId && (
+      {selected && (
         <ItemModal
-          itemId={selectedItemId}
-          onClose={() => setSelectedItemId(null)}
+          itemId={selected.itemId}
+          groupItems={selected.groupItems}
+          startIndex={selected.startIndex}
+          onClose={() => setSelected(null)}
           onDeleted={(id) => {
             setItems((prev) => prev.filter((it) => it.id !== id));
-            setSelectedItemId(null);
+            setSelected(null);
           }}
         />
       )}

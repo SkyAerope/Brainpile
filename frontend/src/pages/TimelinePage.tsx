@@ -1,8 +1,9 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchItems, searchItems, Item } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
+import { groupItemsForGrid } from '../groupItems';
 
 export const TimelinePage: React.FC = () => {
     const [searchParams] = useSearchParams();
@@ -11,7 +12,11 @@ export const TimelinePage: React.FC = () => {
     const [items, setItems] = useState<Item[]>([]);
     const [cursor, setCursor] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
-    const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+    const [selected, setSelected] = useState<{
+        itemId: number;
+        groupItems?: Item[];
+        startIndex?: number;
+    } | null>(null);
 
     const requestSeqRef = useRef(0);
     const activeRequestRef = useRef<AbortController | null>(null);
@@ -59,9 +64,11 @@ export const TimelinePage: React.FC = () => {
         // when toggling between search and timeline.
         setItems([]);
         setCursor(null);
-        setSelectedItemId(null);
+        setSelected(null);
         void load(true);
     }, [query]);
+
+    const groupedItems = useMemo(() => groupItemsForGrid(items), [items]);
 
     return (
         <div className="container">
@@ -71,21 +78,23 @@ export const TimelinePage: React.FC = () => {
                 </div>
             )}
             <MasonryGrid 
-                items={items} 
+                items={groupedItems} 
                 layoutKey={query ?? 'timeline'}
-                onItemClick={(item) => setSelectedItemId(item.id)} 
+                onItemClick={(item, opts) => setSelected({ itemId: item.id, groupItems: item.group_items, startIndex: opts?.startIndex })} 
                 onItemDelete={(id) => setItems((prev) => prev.filter((it) => it.id !== id))}
                 loading={loading}
                 hasMore={!query && !!cursor}
                 onLoadMore={() => load()}
             />
-            {selectedItemId && (
+            {selected && (
                 <ItemModal 
-                    itemId={selectedItemId} 
-                    onClose={() => setSelectedItemId(null)}
+                    itemId={selected.itemId} 
+                    groupItems={selected.groupItems}
+                    startIndex={selected.startIndex}
+                    onClose={() => setSelected(null)}
                     onDeleted={(id) => {
                         setItems((prev) => prev.filter((it) => it.id !== id));
-                        setSelectedItemId(null);
+                        setSelected(null);
                     }}
                 />
             )}

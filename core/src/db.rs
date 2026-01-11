@@ -152,8 +152,8 @@ pub async fn fetch_items_by_ids(
     // 使用 unnest 保持顺序
     let rows = sqlx::query(
         r#"
-        SELECT i.id, i.item_type, i.content_text, i.s3_key, i.thumbnail_key, 
-               i.created_at, i.meta, i.tags
+         SELECT i.id, i.item_type, i.content_text, i.s3_key, i.thumbnail_key, 
+             i.created_at, i.meta, i.tags, i.tg_group_id
         FROM unnest($1::bigint[]) WITH ORDINALITY AS t(id, ord)
         JOIN items i ON i.id = t.id
         ORDER BY t.ord

@@ -68,12 +68,75 @@
   align-items: center;
   justify-content: center;
   min-height: 300px;
+  position: relative;
 }
 
 .modal-media {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+.modal-album-dots {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  z-index: 5;
+}
+
+.modal-album-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.4);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.modal-album-dot.active {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.modal-album-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: #111;
+  font-size: 26px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.modal-album-arrow.left {
+  left: 16px;
+}
+
+.modal-album-arrow.right {
+  right: 16px;
+}
+
+.modal-left:hover .modal-album-arrow {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .modal-placeholder {

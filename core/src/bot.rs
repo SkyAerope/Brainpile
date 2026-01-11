@@ -376,10 +376,13 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
         return Ok(());
     };
 
+    let tg_group_id = msg.media_group_id().map(|id| id.to_string());
+
     let mut payload = serde_json::json!({
         "file_id": file_id,
         "item_type": item_type,
         "content_text": content_text,
+        "tg_group_id": tg_group_id,
         "meta": {}
     });
 

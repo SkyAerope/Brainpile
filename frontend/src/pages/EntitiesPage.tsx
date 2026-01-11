@@ -3,6 +3,7 @@ import { List, type RowComponentProps } from 'react-window';
 import { fetchEntitiesPage, Item, Entity } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
+import { groupItemsForGrid } from '../groupItems';
 
 function formatEntityUpdatedAt(updatedAt?: string | null): string {
     if (!updatedAt) return '';
@@ -33,6 +34,59 @@ function useElementSize<T extends HTMLElement>() {
     return { ref, ...size };
 }
 
+type EntitiesRowProps = {
+    entities: Entity[];
+    selectedEntityId: string | null;
+    onSelectEntity: (id: string) => void;
+};
+
+const EntityRow = ({
+    ariaAttributes,
+    index,
+    style,
+    entities: rowEntities,
+    selectedEntityId: rowSelectedEntityId,
+    onSelectEntity,
+}: RowComponentProps<EntitiesRowProps>): React.ReactElement => {
+    const entity = rowEntities[index];
+
+    if (!entity) {
+        return <div style={style} {...ariaAttributes} />;
+    }
+
+    return (
+        <div style={style} {...ariaAttributes}>
+            <div style={{ padding: '0 12px', paddingBottom: '4px' }}>
+                <div
+                    className={`entity-item ${rowSelectedEntityId === entity.id ? 'active' : ''}`}
+                    onClick={() => onSelectEntity(entity.id)}
+                >
+                    <div className="entity-avatar">
+                        {entity.id === '0' ? (
+                            <div className="avatar-placeholder" style={{ background: '#f0f0f0' }}>?</div>
+                        ) : entity.avatar_url ? (
+                            <img src={entity.avatar_url} alt={entity.name} />
+                        ) : (
+                            <div className="avatar-placeholder">{entity.name[0]}</div>
+                        )}
+                    </div>
+                    <div className="entity-info">
+                        <div className="entity-header-row">
+                            <div className="entity-name">{entity.name}</div>
+                            <div className="entity-updated-at">{formatEntityUpdatedAt(entity.updated_at)}</div>
+                        </div>
+                        <div className="entity-meta">
+                            {entity.id === '0'
+                                ? 'Forwards from hidden profiles'
+                                : `@${entity.username || entity.type}`}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const EntitiesPage: React.FC = () => {
     const [entities, setEntities] = useState<Entity[]>([]);
     const [entitiesTotal, setEntitiesTotal] = useState<number>(0);
@@ -42,7 +96,13 @@ export const EntitiesPage: React.FC = () => {
     const [items, setItems] = useState<Item[]>([]);
     const [cursor, setCursor] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
-    const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+    const [selected, setSelected] = useState<{
+        itemId: number;
+        groupItems?: Item[];
+        startIndex?: number;
+    } | null>(null);
+
+    const groupedItems = useMemo(() => groupItemsForGrid(items), [items]);
 
     const itemsRequestSeqRef = useRef(0);
     const itemsActiveRequestRef = useRef<AbortController | null>(null);
@@ -51,59 +111,6 @@ export const EntitiesPage: React.FC = () => {
     const entitiesActiveRequestRef = useRef<AbortController | null>(null);
 
     const { ref: entitiesListRef, width: entitiesListWidth, height: entitiesListHeight } = useElementSize<HTMLDivElement>();
-
-    type EntitiesRowProps = {
-        entities: Entity[];
-        selectedEntityId: string | null;
-        onSelectEntity: (id: string) => void;
-    };
-
-    const EntityRow = ({
-        ariaAttributes,
-        index,
-        style,
-        entities: rowEntities,
-        selectedEntityId: rowSelectedEntityId,
-        onSelectEntity,
-    }: RowComponentProps<EntitiesRowProps>): React.ReactElement => {
-        const entity = rowEntities[index];
-
-        if (!entity) {
-            return <div style={style} {...ariaAttributes} />;
-        }
-
-        return (
-            <div style={style} {...ariaAttributes}>
-                <div style={{ padding: '0 12px', paddingBottom: '4px' }}>
-                    <div
-                        className={`entity-item ${rowSelectedEntityId === entity.id ? 'active' : ''}`}
-                        onClick={() => onSelectEntity(entity.id)}
-                    >
-                        <div className="entity-avatar">
-                            {entity.id === '0' ? (
-                                <div className="avatar-placeholder" style={{ background: '#f0f0f0' }}>?</div>
-                            ) : entity.avatar_url ? (
-                                <img src={entity.avatar_url} alt={entity.name} />
-                            ) : (
-                                <div className="avatar-placeholder">{entity.name[0]}</div>
-                            )}
-                        </div>
-                        <div className="entity-info">
-                            <div className="entity-header-row">
-                                <div className="entity-name">{entity.name}</div>
-                                <div className="entity-updated-at">{formatEntityUpdatedAt(entity.updated_at)}</div>
-                            </div>
-                            <div className="entity-meta">
-                                {entity.id === '0'
-                                    ? 'Forwards from hidden profiles'
-                                    : `@${entity.username || entity.type}`}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    };
 
     useEffect(() => {
         const controller = new AbortController();
@@ -179,6 +186,7 @@ export const EntitiesPage: React.FC = () => {
             setSelectedEntityId(id);
             setItems([]); // 切换时先清空
             setCursor(null);
+            setSelected(null);
             try {
                 const res = await fetch(`/api/v1/items?entity_id=${id}` , { signal: controller.signal });
                 if (res.ok) {
@@ -276,9 +284,9 @@ export const EntitiesPage: React.FC = () => {
                         </div>
                     ) : (
                         <MasonryGrid 
-                            items={items} 
+                            items={groupedItems} 
                             layoutKey={selectedEntityId}
-                            onItemClick={(item) => setSelectedItemId(item.id)} 
+                            onItemClick={(item, opts) => setSelected({ itemId: item.id, groupItems: item.group_items, startIndex: opts?.startIndex })} 
                             onItemDelete={(id) => setItems((prev) => prev.filter((it) => it.id !== id))}
                             loading={loading}
                             hasMore={!!cursor}
@@ -288,13 +296,15 @@ export const EntitiesPage: React.FC = () => {
                 </div>
             </div>
 
-            {selectedItemId && (
+            {selected && (
                 <ItemModal 
-                    itemId={selectedItemId} 
-                    onClose={() => setSelectedItemId(null)}
+                    itemId={selected.itemId} 
+                    groupItems={selected.groupItems}
+                    startIndex={selected.startIndex}
+                    onClose={() => setSelected(null)}
                     onDeleted={(id) => {
                         setItems((prev) => prev.filter((it) => it.id !== id));
-                        setSelectedItemId(null);
+                        setSelected(null);
                     }}
                 />
             )}

@@ -206,6 +206,12 @@ async fn perform_task(
     let file_id = payload["file_id"].as_str();
     let item_type = payload["item_type"].as_str().unwrap_or("text");
     let content_text = payload["content_text"].as_str().unwrap_or("").to_string();
+
+    let tg_group_id = payload.get("tg_group_id").and_then(|v| match v {
+        serde_json::Value::Number(n) => n.as_i64(),
+        serde_json::Value::String(s) => s.parse::<i64>().ok(),
+        _ => None,
+    });
     
     let mut s3_key: Option<String> = None;
     let mut thumbnail_key: Option<String> = None;
@@ -486,9 +492,9 @@ async fn perform_task(
             item_type, content_hash, s3_key, thumbnail_key, 
             content_text, searchable_text, 
             text_embedding, visual_embedding, 
-            meta, tg_chat_id, tg_message_id, tg_user_id
+            meta, tg_chat_id, tg_message_id, tg_user_id, tg_group_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8::vector, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8::vector, $9, $10, $11, $12, $13)
         RETURNING id
         "#
     )
@@ -504,6 +510,7 @@ async fn perform_task(
     .bind(source_chat_id)
     .bind(source_message_id)
     .bind(source_user_id)
+    .bind(tg_group_id)
     .fetch_one(&state.db)
     .await?;
 

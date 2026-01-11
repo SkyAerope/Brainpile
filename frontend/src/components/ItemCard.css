@@ -33,6 +33,69 @@
   mix-blend-mode: multiply;
 }
 
+.album-dots {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.album-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.4);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.album-dot.active {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.album-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: #111;
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.album-arrow.left {
+  left: 10px;
+}
+
+.album-arrow.right {
+  right: 10px;
+}
+
+.item-card:hover .album-arrow {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* Hover Effects */
 .item-card:hover .item-media img {
   filter: brightness(0.7); /* Darken image on hover to make text pop */

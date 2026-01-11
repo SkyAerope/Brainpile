@@ -245,7 +245,7 @@ async fn list_items(
     let tag_id = params.tag_id;
 
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-        "SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id, tags FROM items",
+        "SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id, tg_group_id, tags FROM items",
     );
 
     let mut has_where = false;
@@ -275,9 +275,18 @@ async fn list_items(
     }
 
     if let Some(tid) = tag_id {
-        push_where(&mut qb, "tags @> ARRAY[");
+        // When filtering by tag, include full Telegram albums (same tg_group_id)
+        // if any member of the album matches the tag.
+        push_where(&mut qb, "(");
+        qb.push("tags @> ARRAY[");
         qb.push_bind(tid);
         qb.push("]::int[]");
+        qb.push(" OR (tg_group_id IS NOT NULL AND tg_group_id IN (");
+        qb.push("SELECT tg_group_id FROM items WHERE tg_group_id IS NOT NULL AND tags @> ARRAY[");
+        qb.push_bind(tid);
+        qb.push("]::int[]" );
+        qb.push("))");
+        qb.push(")");
     }
 
     if mode == "random" {
@@ -316,6 +325,7 @@ async fn list_items(
         let tg_chat_id: Option<i64> = row.try_get("tg_chat_id").ok();
         let tg_user_id: Option<i64> = row.try_get("tg_user_id").ok();
         let tg_message_id: Option<i64> = row.try_get("tg_message_id").ok();
+        let tg_group_id: Option<i64> = row.try_get("tg_group_id").ok();
         let tags: Vec<i32> = row.try_get("tags").unwrap_or_default();
         let tag_objects: Vec<serde_json::Value> = tags
             .iter()
@@ -367,6 +377,7 @@ async fn list_items(
             "width": meta.get("width"),
             "height": meta.get("height"),
             "source_url": source_url,
+            "tg_group_id": tg_group_id.map(|v| v.to_string()),
             "tags": tags,
             "tag_objects": tag_objects,
         }));
@@ -715,6 +726,7 @@ async fn search_items(
         let thumbnail_key: Option<String> = row.get("thumbnail_key");
         let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
         let meta: serde_json::Value = row.try_get("meta").unwrap_or(json!({}));
+        let tg_group_id: Option<i64> = row.try_get("tg_group_id").ok();
         let tags: Vec<i32> = row.try_get("tags").unwrap_or_default();
         let tag_objects: Vec<serde_json::Value> = tags
             .iter()
@@ -742,6 +754,7 @@ async fn search_items(
             "created_at": created_at,
             "width": meta.get("width"),
             "height": meta.get("height"),
+            "tg_group_id": tg_group_id.map(|v| v.to_string()),
             "tags": tags,
             "tag_objects": tag_objects,
         }));

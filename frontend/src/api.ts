@@ -8,6 +8,8 @@ export interface Item {
   width?: number;
   height?: number;
   source_url?: string | null;
+  tg_group_id?: string | null;
+  group_items?: Item[];
   tags?: number[];
   tag_objects?: Tag[];
 }

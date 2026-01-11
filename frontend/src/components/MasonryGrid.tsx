@@ -16,7 +16,7 @@ interface MasonryGridProps {
   items: Item[];
   columnCount?: number;
   layoutKey?: string | number;
-  onItemClick: (item: Item) => void;
+  onItemClick: (item: Item, opts?: { startIndex?: number }) => void;
   onItemDelete?: (id: number) => void;
   loading: boolean;
   hasMore: boolean;
@@ -93,7 +93,7 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
       return (
         <ItemCard
           item={data}
-          onClick={() => onItemClick(data)}
+          onClick={(item, opts) => onItemClick(item, opts)}
           onDeleted={onItemDelete}
         />
       );
