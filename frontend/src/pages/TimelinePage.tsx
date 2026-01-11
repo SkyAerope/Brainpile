@@ -17,7 +17,7 @@ export const TimelinePage: React.FC = () => {
     const activeRequestRef = useRef<AbortController | null>(null);
 
     const load = async (reset = false) => {
-        if (loading) return;
+        if (loading && !reset) return;
         const requestSeq = (requestSeqRef.current += 1);
         activeRequestRef.current?.abort();
         const controller = new AbortController();
@@ -54,8 +54,13 @@ export const TimelinePage: React.FC = () => {
         }
     };
 
-    useEffect(() => { 
-        load(true); 
+    useEffect(() => {
+        // Ensure we don't show stale results or keep stale pagination state
+        // when toggling between search and timeline.
+        setItems([]);
+        setCursor(null);
+        setSelectedItemId(null);
+        void load(true);
     }, [query]);
 
     return (

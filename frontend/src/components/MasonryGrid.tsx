@@ -1,8 +1,16 @@
-import React, { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { Item } from '../api';
 import { ItemCard } from './ItemCard';
 import { Masonry } from 'masonic';
 import type { RenderComponentProps } from 'masonic';
+
+function isValidItem(value: unknown): value is Item {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as any).id === 'number'
+  );
+}
 
 interface MasonryGridProps {
   items: Item[];
@@ -44,6 +52,19 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
 }) => {
   const windowWidth = useWindowWidth();
 
+  // Masonic caches layout by index; if the items array shrinks (e.g. delete/reset/query switch),
+  // it may render with stale indices before any effects run. Detect shrink synchronously and
+  // force a remount via `key` to drop internal caches.
+  const prevLenRef = useRef(items.length);
+  const shrinkNonceRef = useRef(0);
+  if (items.length < prevLenRef.current) {
+    shrinkNonceRef.current += 1;
+  }
+  prevLenRef.current = items.length;
+  const shrinkNonce = shrinkNonceRef.current;
+
+  const safeItems = useMemo(() => items.filter(isValidItem), [items]);
+
   const isEntitiesPage = window.location.pathname.startsWith('/entities');
   const contentWidth = isEntitiesPage ? windowWidth - 440 : windowWidth - 80;
   const columnCount = getColumnCount(contentWidth);
@@ -83,13 +104,13 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   return (
     <>
       <Masonry
-        key={layoutKey ?? 'default'}
+        key={`${layoutKey ?? 'default'}:${shrinkNonce}`}
         className="my-masonry-grid"
-        items={items}
+        items={safeItems}
         columnCount={columnCount}
         columnGutter={16}
         rowGutter={16}
-        itemKey={(data, index) => (data ? data.id : `missing-${index}`)}
+        itemKey={(data, index) => (data ? String(data.id) : `missing-${index}`)}
         itemHeightEstimate={320}
         render={renderCard}
       />
