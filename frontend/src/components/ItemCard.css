@@ -19,7 +19,7 @@
   width: 100%;
   border-radius: 16px;
   overflow: hidden;
-  background: #f5f5f5; /* Light gray background to show through white/transparent images */
+  background: var(--card-bg); /* Light gray background to show through white/transparent images */
   will-change: transform;
 }
 
@@ -83,7 +83,7 @@
 }
 
 .view-btn:hover {
-  background: #ad081b;
+  background: #678070;
 }
 
 .source-link {
@@ -217,14 +217,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f5f5f5;
+  background: var(--card-bg);
   border-radius: 16px;
   color: #ccc;
 }
 
 /* Text Item specific style (when type is "text") */
 .item-card.type-text .item-media-placeholder {
-  background: #f5f5f5;
+  background: var(--card-bg);
   border-radius: 16px;
   padding: 20px;
   min-height: 120px;
