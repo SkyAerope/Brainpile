@@ -16,29 +16,17 @@ interface Props {
 const ANIMATION_DURATION = 300;
 
 const globalLoadedImageUrls = new Set<string>();
-const globalInflightImageLoads = new Map<string, Promise<void>>();
 
-function preloadImageOnce(url: string): Promise<void> {
-  if (globalLoadedImageUrls.has(url)) return Promise.resolve();
-  const inflight = globalInflightImageLoads.get(url);
-  if (inflight) return inflight;
-
-  const p = new Promise<void>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      globalLoadedImageUrls.add(url);
-      globalInflightImageLoads.delete(url);
-      resolve();
-    };
-    img.onerror = (e) => {
-      globalInflightImageLoads.delete(url);
-      reject(e);
-    };
-    img.src = url;
+function markImageLoaded(url: string | null | undefined, setLoadedImages: React.Dispatch<React.SetStateAction<Set<string>>>) {
+  if (!url) return;
+  if (globalLoadedImageUrls.has(url)) return;
+  globalLoadedImageUrls.add(url);
+  setLoadedImages((prev) => {
+    if (prev.has(url)) return prev;
+    const next = new Set(prev);
+    next.add(url);
+    return next;
   });
-
-  globalInflightImageLoads.set(url, p);
-  return p;
 }
 
 export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onClose, onDeleted }) => {
@@ -47,12 +35,8 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
   const [loading, setLoading] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // 跟踪图片加载状态
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
-
-  // 动画状态：保存上一张图的索引和滑动方向
-  const [prevIndex, setPrevIndex] = useState<number | null>(null);
-  const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('left');
+  const [isAnimating, setIsAnimating] = useState(false);
 
   const album = useMemo(() => (groupItems && groupItems.length > 1 ? groupItems : null), [groupItems]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -70,16 +54,6 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
   // 当前显示项的详情（需要在预加载逻辑之前可用）
   const detail = detailsCache.get(currentItemId) ?? null;
 
-  const previewItem = useMemo(() => {
-    if (!album) return null;
-    return album[Math.min(activeIndex, album.length - 1)];
-  }, [album, activeIndex]);
-
-  const prevPreviewItem = useMemo(() => {
-    if (!album || prevIndex === null) return null;
-    return album[Math.min(prevIndex, album.length - 1)];
-  }, [album, prevIndex]);
-
   const albumCaption = useMemo(() => {
     if (!album) return null;
     for (const it of album) {
@@ -87,32 +61,6 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
     }
     return null;
   }, [album]);
-
-  // 预加载所有组图图片（非组图时也要预加载 detail 的图，否则会一直停在 Loading）
-  const allImageUrls = useMemo(() => {
-    if (!album) {
-      const url = detail?.s3_url;
-      return url ? [url] : [];
-    }
-    return album
-      .filter((it) => it.type === 'image' || it.type === 'video')
-      .map((it) => it.s3_url)
-      .filter((url): url is string => !!url);
-  }, [album, detail?.s3_url]);
-
-  useEffect(() => {
-    // 预加载所有图片
-    allImageUrls.forEach((url) => {
-      void preloadImageOnce(url).then(() => {
-        setLoadedImages((prev) => {
-          if (prev.has(url)) return prev;
-          const next = new Set(prev);
-          next.add(url);
-          return next;
-        });
-      });
-    });
-  }, [allImageUrls, loadedImages]);
 
   // 一次性加载所有组图项的详情
   useEffect(() => {
@@ -140,12 +88,6 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
     });
   }, [album, itemId]);
 
-  // 当前图片是否已加载
-  const currentImageUrl = previewItem?.s3_url ?? detail?.s3_url;
-  const prevImageUrl = prevPreviewItem?.s3_url ?? null;
-  const isCurrentImageLoaded = currentImageUrl ? (loadedImages.has(currentImageUrl) || globalLoadedImageUrls.has(currentImageUrl)) : true;
-  const isPrevImageLoaded = prevImageUrl ? (loadedImages.has(prevImageUrl) || globalLoadedImageUrls.has(prevImageUrl)) : true;
-
   const handleDelete = async () => {
     try {
       await deleteItem(currentItemId);
@@ -159,34 +101,31 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
   const albumCount = album?.length ?? 0;
   const canNavigate = albumCount > 1;
 
-  // 切换到指定索引
-  const switchTo = (newIndex: number, direction: 'left' | 'right') => {
-    if (newIndex === activeIndex || prevIndex !== null || !album) return;
-    setPrevIndex(activeIndex);
-    setSlideDirection(direction);
+  const switchTo = (newIndex: number) => {
+    if (!album) return;
+    if (newIndex === activeIndex) return;
+    if (isAnimating) return;
+    setIsAnimating(true);
     setActiveIndex(newIndex);
-    setTimeout(() => {
-      setPrevIndex(null);
-    }, ANIMATION_DURATION);
+    window.setTimeout(() => setIsAnimating(false), ANIMATION_DURATION);
   };
 
   const goPrev = () => {
-    if (!album || prevIndex !== null) return;
+    if (!album || isAnimating) return;
     const newIndex = (activeIndex - 1 + album.length) % album.length;
-    switchTo(newIndex, 'right');
+    switchTo(newIndex);
   };
 
   const goNext = () => {
-    if (!album || prevIndex !== null) return;
+    if (!album || isAnimating) return;
     const newIndex = (activeIndex + 1) % album.length;
-    switchTo(newIndex, 'left');
+    switchTo(newIndex);
   };
 
   const handleDotClick = (e: React.MouseEvent, targetIndex: number) => {
     e.stopPropagation();
-    if (targetIndex === activeIndex || prevIndex !== null || !album) return;
-    const direction = targetIndex > activeIndex ? 'left' : 'right';
-    switchTo(targetIndex, direction);
+    if (targetIndex === activeIndex || isAnimating || !album) return;
+    switchTo(targetIndex);
   };
 
   if (loading && detailsCache.size === 0) return <div className="modal-overlay"><div className="modal-loading">Loading...</div></div>;
@@ -214,37 +153,50 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
             <div className="modal-left">
               {/* Media Preview */}
               <div className="modal-slider">
-                {/* 上一张图（滑出） */}
-                {prevIndex !== null && prevImageUrl && isPrevImageLoaded && (
-                  <div className={`modal-slide modal-slide-out-${slideDirection}`}>
-                    {prevPreviewItem?.type === 'video' ? (
-                      <video src={prevImageUrl} className="modal-media" />
-                    ) : (
-                      <img src={prevImageUrl} alt="Previous" className="modal-media" />
-                    )}
-                  </div>
-                )}
-                {/* 当前图（滑入或静止） */}
-                <div className={`modal-slide ${prevIndex !== null ? `modal-slide-in-${slideDirection}` : ''}`}>
-                  {isCurrentImageLoaded ? (
-                    (previewItem?.s3_url || detail.s3_url) && (
-                      (previewItem?.type ?? detail.type) === 'video' ? (
-                        <video controls src={(previewItem?.s3_url ?? detail.s3_url) as string} className="modal-media" />
-                      ) : ((previewItem?.type ?? detail.type) === 'image' ? (
-                        <img src={(previewItem?.s3_url ?? detail.s3_url) as string} alt="Full content" className="modal-media" />
-                      ) : null)
-                    ) || (
-                      <div className="modal-placeholder">
-                        {detail.type === 'text' ? <FileText size={64} /> : <ImageIcon size={64} />}
-                        <p>No Media Preview</p>
+                <div
+                  className="modal-track"
+                  style={{
+                    transform: `translateX(${-activeIndex * 100}%)`,
+                    transition: canNavigate ? `transform ${ANIMATION_DURATION}ms cubic-bezier(0.33, 0.33, 0, 1)` : undefined,
+                  }}
+                >
+                  {(album ? album : [detail]).map((it: any) => {
+                    const type = (it.type ?? detail.type) as string;
+                    const url = (it.s3_url ?? detail.s3_url) as string | null | undefined;
+
+                    const isLoaded = url
+                      ? (loadedImages.has(url) || globalLoadedImageUrls.has(url))
+                      : true;
+
+                    return (
+                      <div key={it.id ?? itemId} className="modal-slide">
+                        {type === 'video' && url ? (
+                          <video controls src={url} className="modal-media" />
+                        ) : type === 'image' && url ? (
+                          <>
+                            <img
+                              src={url}
+                              alt="Full content"
+                              className="modal-media"
+                              loading="eager"
+                              onLoad={() => markImageLoaded(url, setLoadedImages)}
+                            />
+                            {!isLoaded && (
+                              <div className="modal-placeholder">
+                                <ImageIcon size={64} />
+                                <p>Loading...</p>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="modal-placeholder">
+                            {detail.type === 'text' ? <FileText size={64} /> : <ImageIcon size={64} />}
+                            <p>No Media Preview</p>
+                          </div>
+                        )}
                       </div>
-                    )
-                  ) : (
-                    <div className="modal-placeholder">
-                      <ImageIcon size={64} />
-                      <p>Loading...</p>
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
               </div>
 
