@@ -299,12 +299,42 @@ async fn list_items(
         qb.push_bind(limit);
     }
 
-    let rows: Vec<PgRow> = qb.build().fetch_all(&state.db).await.unwrap_or_default();
+    let base_rows: Vec<PgRow> = qb.build().fetch_all(&state.db).await.unwrap_or_default();
+
+    // Random mode: if a random pick hits a Telegram album member (same tg_group_id),
+    // expand the response to include the full album.
+    let extra_rows: Vec<PgRow> = if mode == "random" {
+        let mut group_ids: Vec<i64> = Vec::new();
+        let mut seen: HashSet<i64> = HashSet::new();
+
+        for row in &base_rows {
+            let tg_group_id: Option<i64> = row.try_get("tg_group_id").ok();
+            if let Some(gid) = tg_group_id {
+                if seen.insert(gid) {
+                    group_ids.push(gid);
+                }
+            }
+        }
+
+        if group_ids.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query(
+                "SELECT id, item_type, content_text, s3_key, thumbnail_key, created_at, meta, tg_chat_id, tg_user_id, tg_message_id, tg_group_id, tags FROM items WHERE tg_group_id = ANY($1)"
+            )
+            .bind(&group_ids)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default()
+        }
+    } else {
+        Vec::new()
+    };
 
     let mut items = Vec::new();
 
     let mut unique_tag_ids: HashSet<i32> = HashSet::new();
-    for row in &rows {
+    for row in base_rows.iter().chain(extra_rows.iter()) {
         let ids: Vec<i32> = row.try_get("tags").unwrap_or_default();
         for id in ids {
             unique_tag_ids.insert(id);
@@ -314,8 +344,12 @@ async fn list_items(
     unique_tag_ids_vec.sort_unstable();
     let tags_map = fetch_tags_map(&state, &unique_tag_ids_vec).await;
 
-    for row in &rows {
+    let mut seen_item_ids: HashSet<i64> = HashSet::new();
+    for row in base_rows.iter().chain(extra_rows.iter()) {
         let id: i64 = row.get("id");
+        if !seen_item_ids.insert(id) {
+            continue;
+        }
         let item_type: String = row.get("item_type");
         let content_text: Option<String> = row.get("content_text");
         let s3_key: Option<String> = row.get("s3_key");
@@ -385,7 +419,7 @@ async fn list_items(
 
     // 计算下一页游标
     let next_cursor = if mode != "random" && items.len() == limit as usize {
-        rows.last().map(|r| r.get::<i64, _>("id"))
+        base_rows.last().map(|r| r.get::<i64, _>("id"))
     } else {
         None
     };

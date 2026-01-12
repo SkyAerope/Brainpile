@@ -125,18 +125,19 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   const safeItems = useMemo(() => items.filter(isValidItem), [items]);
 
   const isDrawerPage = window.location.pathname.startsWith('/entities') || window.location.pathname.startsWith('/tags');
-  const contentWidth = isDrawerPage ? windowWidth - 440 : windowWidth - 80;
-  const columnCount = getColumnCount(contentWidth);
 
-  const containerPosition = useContainerPosition(containerRef, [windowWidth, isDrawerPage, columnCount]);
+  const containerPosition = useContainerPosition(containerRef, [windowWidth, isDrawerPage]);
+  const fallbackWidth = isDrawerPage ? windowWidth - 440 : windowWidth - 80;
+  const effectiveWidth = Math.max(1, containerPosition.width || fallbackWidth);
+  const columnCount = getColumnCount(effectiveWidth);
   const positioner = usePositioner(
     {
-      width: containerPosition.width,
+      width: effectiveWidth,
       columnCount,
       columnGutter: 16,
       rowGutter: 16,
     },
-    [containerPosition.width, columnCount, shrinkNonce, layoutKey]
+    [effectiveWidth, columnCount, shrinkNonce, layoutKey]
   );
   const resizeObserver = useResizeObserver(positioner);
 

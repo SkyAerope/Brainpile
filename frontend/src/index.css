@@ -114,7 +114,7 @@ body {
 }
 
 .entities-list ::-webkit-scrollbar-track {
-  margin-block: 12px;
+  margin-bottom: 12px;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -311,7 +311,7 @@ body.modal-open .entities-list {
   transition: background-color 0.2s;
 }
 
-/* Masonry Layout Adjustments */
+/* 瀑布流布局 */
 .my-masonry-grid {
   width: 100%;
 }
@@ -320,7 +320,7 @@ body.modal-open .entities-list {
   background-clip: padding-box;
 }
 
-/* Fallback / Other Grids */
+/* 备用布局 / 其他网格 */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -343,7 +343,8 @@ body.modal-open .entities-list {
   padding-top: 20px;
 }
 
-/* Entities Drawer Styles */
+/* 抽屉样式 */
+/* 因为做抽屉的时候还没有tags页，所以叫.entities-drawer，不想改了 */
 .entities-drawer {
   width: 320px;
   height: calc(100vh - 48px);
