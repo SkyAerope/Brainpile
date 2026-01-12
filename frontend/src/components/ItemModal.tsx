@@ -15,6 +15,32 @@ interface Props {
 
 const ANIMATION_DURATION = 300;
 
+const globalLoadedImageUrls = new Set<string>();
+const globalInflightImageLoads = new Map<string, Promise<void>>();
+
+function preloadImageOnce(url: string): Promise<void> {
+  if (globalLoadedImageUrls.has(url)) return Promise.resolve();
+  const inflight = globalInflightImageLoads.get(url);
+  if (inflight) return inflight;
+
+  const p = new Promise<void>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      globalLoadedImageUrls.add(url);
+      globalInflightImageLoads.delete(url);
+      resolve();
+    };
+    img.onerror = (e) => {
+      globalInflightImageLoads.delete(url);
+      reject(e);
+    };
+    img.src = url;
+  });
+
+  globalInflightImageLoads.set(url, p);
+  return p;
+}
+
 export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onClose, onDeleted }) => {
   // 所有组图项的详情缓存
   const [detailsCache, setDetailsCache] = useState<Map<number, ItemDetail>>(new Map());
@@ -41,6 +67,9 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
 
   const currentItemId = album ? album[Math.min(activeIndex, album.length - 1)].id : itemId;
 
+  // 当前显示项的详情（需要在预加载逻辑之前可用）
+  const detail = detailsCache.get(currentItemId) ?? null;
+
   const previewItem = useMemo(() => {
     if (!album) return null;
     return album[Math.min(activeIndex, album.length - 1)];
@@ -59,31 +88,31 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
     return null;
   }, [album]);
 
-  // 预加载所有组图图片
+  // 预加载所有组图图片（非组图时也要预加载 detail 的图，否则会一直停在 Loading）
   const allImageUrls = useMemo(() => {
     if (!album) {
-      // 单张图片
-      const singleItem = groupItems?.[0];
-      const url = singleItem?.s3_url;
+      const url = detail?.s3_url;
       return url ? [url] : [];
     }
     return album
       .filter((it) => it.type === 'image' || it.type === 'video')
       .map((it) => it.s3_url)
       .filter((url): url is string => !!url);
-  }, [album, groupItems]);
+  }, [album, detail?.s3_url]);
 
   useEffect(() => {
     // 预加载所有图片
     allImageUrls.forEach((url) => {
-      if (loadedImages.has(url)) return;
-      const img = new Image();
-      img.onload = () => {
-        setLoadedImages((prev) => new Set(prev).add(url));
-      };
-      img.src = url;
+      void preloadImageOnce(url).then(() => {
+        setLoadedImages((prev) => {
+          if (prev.has(url)) return prev;
+          const next = new Set(prev);
+          next.add(url);
+          return next;
+        });
+      });
     });
-  }, [allImageUrls]);
+  }, [allImageUrls, loadedImages]);
 
   // 一次性加载所有组图项的详情
   useEffect(() => {
@@ -111,14 +140,11 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
     });
   }, [album, itemId]);
 
-  // 当前显示项的详情
-  const detail = detailsCache.get(currentItemId) ?? null;
-
   // 当前图片是否已加载
   const currentImageUrl = previewItem?.s3_url ?? detail?.s3_url;
   const prevImageUrl = prevPreviewItem?.s3_url ?? null;
-  const isCurrentImageLoaded = currentImageUrl ? loadedImages.has(currentImageUrl) : true;
-  const isPrevImageLoaded = prevImageUrl ? loadedImages.has(prevImageUrl) : true;
+  const isCurrentImageLoaded = currentImageUrl ? (loadedImages.has(currentImageUrl) || globalLoadedImageUrls.has(currentImageUrl)) : true;
+  const isPrevImageLoaded = prevImageUrl ? (loadedImages.has(prevImageUrl) || globalLoadedImageUrls.has(prevImageUrl)) : true;
 
   const handleDelete = async () => {
     try {

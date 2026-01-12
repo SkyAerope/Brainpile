@@ -13,6 +13,32 @@ interface Props {
 
 const ANIMATION_DURATION = 300;
 
+const globalLoadedImageUrls = new Set<string>();
+const globalInflightImageLoads = new Map<string, Promise<void>>();
+
+function preloadImageOnce(url: string): Promise<void> {
+  if (globalLoadedImageUrls.has(url)) return Promise.resolve();
+  const inflight = globalInflightImageLoads.get(url);
+  if (inflight) return inflight;
+
+  const p = new Promise<void>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      globalLoadedImageUrls.add(url);
+      globalInflightImageLoads.delete(url);
+      resolve();
+    };
+    img.onerror = (e) => {
+      globalInflightImageLoads.delete(url);
+      reject(e);
+    };
+    img.src = url;
+  });
+
+  globalInflightImageLoads.set(url, p);
+  return p;
+}
+
 export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -42,12 +68,14 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   useEffect(() => {
     // 预加载所有图片
     allImageUrls.forEach((url) => {
-      if (loadedImages.has(url)) return;
-      const img = new Image();
-      img.onload = () => {
-        setLoadedImages((prev) => new Set(prev).add(url));
-      };
-      img.src = url;
+      void preloadImageOnce(url).then(() => {
+        setLoadedImages((prev) => {
+          if (prev.has(url)) return prev;
+          const next = new Set(prev);
+          next.add(url);
+          return next;
+        });
+      });
     });
   }, [allImageUrls]);
 
@@ -55,12 +83,15 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   useEffect(() => {
     if (isAlbum) return;
     const url = item.thumbnail_url || item.s3_url;
-    if (!url || loadedImages.has(url)) return;
-    const img = new Image();
-    img.onload = () => {
-      setLoadedImages((prev) => new Set(prev).add(url));
-    };
-    img.src = url;
+    if (!url) return;
+    void preloadImageOnce(url).then(() => {
+      setLoadedImages((prev) => {
+        if (prev.has(url)) return prev;
+        const next = new Set(prev);
+        next.add(url);
+        return next;
+      });
+    });
   }, [isAlbum, item.thumbnail_url, item.s3_url]);
 
   useEffect(() => {
@@ -76,8 +107,8 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
 
   const currentImageUrl = displayItem.thumbnail_url || displayItem.s3_url;
   const prevImageUrl = prevDisplayItem ? (prevDisplayItem.thumbnail_url || prevDisplayItem.s3_url) : null;
-  const isCurrentImageLoaded = currentImageUrl ? loadedImages.has(currentImageUrl) : true;
-  const isPrevImageLoaded = prevImageUrl ? loadedImages.has(prevImageUrl) : true;
+  const isCurrentImageLoaded = currentImageUrl ? (loadedImages.has(currentImageUrl) || globalLoadedImageUrls.has(currentImageUrl)) : true;
+  const isPrevImageLoaded = prevImageUrl ? (loadedImages.has(prevImageUrl) || globalLoadedImageUrls.has(prevImageUrl)) : true;
 
   const aspectRatio =
     displayItem.width && displayItem.height ? displayItem.width / displayItem.height : undefined;
@@ -201,7 +232,11 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
               <button type="button" className="album-arrow right" aria-label="Next" onClick={handleNext}>
                 <ChevronRight size={20} />
               </button>
-              <div className="album-dots" aria-label={`Album with ${groupCount} items`}>
+              <div
+                className="album-dots"
+                aria-label={`Album with ${groupCount} items`}
+                onClick={(e) => e.stopPropagation()}
+              >
                 {Array.from({ length: groupCount }).map((_, i) => (
                   <button
                     key={i}

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { List, type RowComponentProps } from 'react-window';
-import { fetchEntitiesPage, Item, Entity } from '../api';
+import { fetchEntitiesPage, fetchItems, Item, Entity } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
 import { groupItemsForGrid } from '../groupItems';
@@ -127,10 +127,14 @@ export const EntitiesPage: React.FC = () => {
                 setEntitiesTotal(data.total);
             })
             .catch((e) => {
-                if ((e as any)?.name !== 'AbortError') console.error(e);
+                if ((e as any)?.name !== 'AbortError') {
+                    console.error(e);
+                }
             })
             .finally(() => {
-                if (entitiesRequestSeqRef.current === requestSeq) setEntitiesLoading(false);
+                if (entitiesRequestSeqRef.current === requestSeq) {
+                    setEntitiesLoading(false);
+                }
             });
 
         return () => controller.abort();
@@ -188,14 +192,11 @@ export const EntitiesPage: React.FC = () => {
             setCursor(null);
             setSelected(null);
             try {
-                const res = await fetch(`/api/v1/items?entity_id=${id}` , { signal: controller.signal });
-                if (res.ok) {
-                    const data = await res.json();
+                const data = await fetchItems(null, 'timeline', id, null, controller.signal);
 
-                    if (itemsRequestSeqRef.current !== requestSeq) return;
-                    setItems(data.items);
-                    setCursor(data.next_cursor);
-                }
+                if (itemsRequestSeqRef.current !== requestSeq) return;
+                setItems(data.items);
+                setCursor(data.next_cursor);
             } catch (e) {
                 if ((e as any)?.name !== 'AbortError') {
                     console.error(e);
@@ -226,16 +227,13 @@ export const EntitiesPage: React.FC = () => {
 
         setLoading(true);
         try {
-            const res = await fetch(`/api/v1/items?entity_id=${entityId}&cursor=${cursorSnapshot}`, { signal: controller.signal });
-            if (res.ok) {
-                const data = await res.json();
+            const data = await fetchItems(cursorSnapshot, 'timeline', entityId, null, controller.signal);
 
-                if (itemsRequestSeqRef.current !== requestSeq) return;
-                // Ensure we still show the same entity's items
-                if (entityId !== selectedEntityId) return;
-                setItems(prev => [...prev, ...data.items]);
-                setCursor(data.next_cursor);
-            }
+            if (itemsRequestSeqRef.current !== requestSeq) return;
+            // Ensure we still show the same entity's items
+            if (entityId !== selectedEntityId) return;
+            setItems(prev => [...prev, ...data.items]);
+            setCursor(data.next_cursor);
         } catch (e) {
             if ((e as any)?.name !== 'AbortError') {
                 console.error(e);
