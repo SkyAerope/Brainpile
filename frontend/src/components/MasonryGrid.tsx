@@ -183,7 +183,8 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     height,
     isScrolling,
     itemHeightEstimate: 320,
-    itemKey: (data) => data.id,
+    // 使Random页的元素可以重复
+    itemKey: (data, index) => `${data.id}:${index}`,
     render: renderCard,
     overscanBy: 2,
   });
