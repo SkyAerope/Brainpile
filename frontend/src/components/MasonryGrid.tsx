@@ -110,7 +110,7 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
         columnCount={columnCount}
         columnGutter={16}
         rowGutter={16}
-        itemKey={(data, index) => (data ? String(data.id) : `missing-${index}`)}
+        itemKey={(data, index) => (data ? `${data.id}:${index}` : `missing-${index}`)}
         itemHeightEstimate={320}
         render={renderCard}
       />
