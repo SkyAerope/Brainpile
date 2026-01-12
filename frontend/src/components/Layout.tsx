@@ -39,7 +39,9 @@ export const Layout: React.FC = () => {
           onSearch={handleSearch} 
           clearSearch={clearSearch} 
         />
-        <Outlet />
+        <div className="main-scroll">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

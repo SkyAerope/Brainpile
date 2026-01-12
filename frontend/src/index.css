@@ -8,16 +8,22 @@
   --border-color: #efefef;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: var(--bg-color);
   color: var(--text-primary);
-  overflow-y: scroll;
+  overflow: hidden;
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100%;
 }
 
 * {
@@ -80,7 +86,45 @@ body {
   margin-left: 80px; /* Offset for fixed sidebar */
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Scrollbar styling (accent color) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.entities-list ::-webkit-scrollbar-track {
+  margin-block: 12px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--secondary-accent-color);
+  border-radius: 999px;
+  background-clip: content-box;
+  border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* Lock background scrolling when ItemModal is open */
+body.modal-open .main-scroll,
+body.modal-open .entities-list {
+  overflow: hidden !important;
 }
 
 .container {

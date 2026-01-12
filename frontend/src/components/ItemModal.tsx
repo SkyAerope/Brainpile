@@ -41,6 +41,7 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
 
   const album = useMemo(() => (groupItems && groupItems.length > 1 ? groupItems : null), [groupItems]);
   const [activeIndex, setActiveIndex] = useState(0);
+
   useEffect(() => {
     if (!album) {
       setActiveIndex(0);
@@ -202,7 +203,7 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
   const isText = detail.type === 'text';
 
   const mediaSection = !isText && (
-    <div className="modal-left">
+    <div className="modal-left" onClick={onClose}>
       {/* Media Preview */}
       <div className="modal-slider">
         <div
@@ -223,7 +224,12 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
             return (
               <div key={it.id ?? itemId} className="modal-slide">
                 {type === 'video' && url ? (
-                  <video controls src={url} className="modal-media" />
+                  <video
+                    controls
+                    src={url}
+                    className="modal-media"
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 ) : type === 'image' && url ? (
                   <>
                     <img
@@ -231,6 +237,7 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
                       alt="Full content"
                       className="modal-media"
                       loading="eager"
+                      onClick={(e) => e.stopPropagation()}
                       ref={(img) => {
                         if (!img) return;
                         if (img.complete && img.naturalWidth > 0) {
@@ -282,7 +289,11 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
           >
             <ChevronRight size={24} />
           </button>
-          <div className="modal-album-dots" aria-label={`Album with ${albumCount} items`}>
+          <div
+            className="modal-album-dots"
+            aria-label={`Album with ${albumCount} items`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {Array.from({ length: albumCount }).map((_, i) => (
               <button
                 key={i}
