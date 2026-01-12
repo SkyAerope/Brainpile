@@ -135,6 +135,8 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
 
   const effectiveContent = albumCaption ?? detail.content;
 
+  const isText = detail.type === 'text';
+
   const infoSection = (
     <div className="modal-info-panel">
       <h2>{detail.type.toUpperCase()} Item</h2>
@@ -186,21 +188,21 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
         <button className="btn btn-delete" onClick={() => setShowConfirm(true)}>
           <Trash2 size={16} /> Delete
         </button>
-        <a 
-          href={`/api/v1/items/${currentItemId}/raw`} 
-          target="_blank" 
-          rel="noreferrer"
-          className="btn btn-secondary" 
-          style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}
-        >
-          <Download size={16} />
-          Download Raw
-        </a>
+        {!isText && (
+          <a
+            href={`/api/v1/items/${currentItemId}/raw`} 
+            target="_blank" 
+            rel="noreferrer"
+            className="btn btn-secondary" 
+            style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}
+          >
+            <Download size={16} />
+            Download Raw
+          </a>
+        )}
       </div>
     </div>
   );
-
-  const isText = detail.type === 'text';
 
   const mediaSection = !isText && (
     <div className="modal-left" onClick={onClose}>
