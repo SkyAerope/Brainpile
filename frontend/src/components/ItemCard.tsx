@@ -24,8 +24,9 @@ function getCardPreviewUrl(it: Item): string | null {
 
 function markImageLoaded(url: string | null | undefined, setLoadedImages: React.Dispatch<React.SetStateAction<Set<string>>>) {
   if (!url) return;
-  if (globalLoadedImageUrls.has(url)) return;
-  globalLoadedImageUrls.add(url);
+  if (!globalLoadedImageUrls.has(url)) {
+    globalLoadedImageUrls.add(url);
+  }
   setLoadedImages((prev) => {
     if (prev.has(url)) return prev;
     const next = new Set(prev);
@@ -177,6 +178,12 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
                             src={previewUrl}
                             alt="content"
                             loading="eager"
+                            ref={(img) => {
+                              if (!img) return;
+                              if (img.complete && img.naturalWidth > 0) {
+                                markImageLoaded(previewUrl, setLoadedImages);
+                              }
+                            }}
                             onLoad={() => markImageLoaded(previewUrl, setLoadedImages)}
                           />
                           {!isLoaded && (
@@ -192,6 +199,12 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
                               src={previewUrl}
                               alt="video"
                               loading="eager"
+                              ref={(img) => {
+                                if (!img) return;
+                                if (img.complete && img.naturalWidth > 0) {
+                                  markImageLoaded(previewUrl, setLoadedImages);
+                                }
+                              }}
                               onLoad={() => markImageLoaded(previewUrl, setLoadedImages)}
                             />
                             {!isLoaded && (

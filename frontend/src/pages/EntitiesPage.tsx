@@ -4,6 +4,7 @@ import { fetchEntitiesPage, fetchItems, Item, Entity } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
 import { groupItemsForGrid } from '../groupItems';
+import { mergeUniqueItemsById, uniqueItemsById } from '../itemList';
 
 function formatEntityUpdatedAt(updatedAt?: string | null): string {
     if (!updatedAt) return '';
@@ -195,7 +196,7 @@ export const EntitiesPage: React.FC = () => {
                 const data = await fetchItems(null, 'timeline', id, null, controller.signal);
 
                 if (itemsRequestSeqRef.current !== requestSeq) return;
-                setItems(data.items);
+                setItems(uniqueItemsById(data.items));
                 setCursor(data.next_cursor);
             } catch (e) {
                 if ((e as any)?.name !== 'AbortError') {
@@ -232,7 +233,7 @@ export const EntitiesPage: React.FC = () => {
             if (itemsRequestSeqRef.current !== requestSeq) return;
             // Ensure we still show the same entity's items
             if (entityId !== selectedEntityId) return;
-            setItems(prev => [...prev, ...data.items]);
+            setItems((prev) => mergeUniqueItemsById(prev, data.items));
             setCursor(data.next_cursor);
         } catch (e) {
             if ((e as any)?.name !== 'AbortError') {

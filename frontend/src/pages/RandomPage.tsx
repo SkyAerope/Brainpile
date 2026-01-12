@@ -3,6 +3,7 @@ import { fetchItems, Item } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
 import { groupItemsForGrid } from '../groupItems';
+import { mergeUniqueItemsById } from '../itemList';
 
 export const RandomPage: React.FC = () => {
     const [items, setItems] = useState<Item[]>([]);
@@ -20,7 +21,7 @@ export const RandomPage: React.FC = () => {
         setLoading(true);
         try {
             const data = await fetchItems(null, 'random');
-            setItems(prev => [...prev, ...data.items]);
+            setItems((prev) => mergeUniqueItemsById(prev, data.items));
         } catch (e) { console.error(e); }
         finally { setLoading(false); }
     };
@@ -45,7 +46,7 @@ export const RandomPage: React.FC = () => {
                     startIndex={selected.startIndex}
                     onClose={() => setSelected(null)}
                     onDeleted={(id) => {
-                        setItems(items.filter(it => it.id !== id));
+                        setItems((prev) => prev.filter((it) => it.id !== id));
                         setSelected(null);
                     }}
                 />

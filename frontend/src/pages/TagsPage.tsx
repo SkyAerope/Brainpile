@@ -7,6 +7,7 @@ import { ItemModal } from '../components/ItemModal';
 import { TagIcon } from '../components/TagIcon';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { groupItemsForGrid } from '../groupItems';
+import { mergeUniqueItemsById, uniqueItemsById } from '../itemList';
 
 function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
@@ -229,7 +230,7 @@ export const TagsPage: React.FC = () => {
     try {
       const data = await fetchItems(null, 'timeline', null, id, controller.signal);
       if (itemsRequestSeqRef.current !== requestSeq) return;
-      setItems(data.items);
+      setItems(uniqueItemsById(data.items));
       setCursor(data.next_cursor);
     } catch (e) {
       if ((e as any)?.name !== 'AbortError') console.error(e);
@@ -254,7 +255,7 @@ export const TagsPage: React.FC = () => {
       const data = await fetchItems(cursorSnapshot, 'timeline', null, tagId, controller.signal);
       if (itemsRequestSeqRef.current !== requestSeq) return;
       if (tagId !== selectedTagId) return;
-      setItems((prev) => [...prev, ...data.items]);
+      setItems((prev) => mergeUniqueItemsById(prev, data.items));
       setCursor(data.next_cursor);
     } catch (e) {
       if ((e as any)?.name !== 'AbortError') console.error(e);

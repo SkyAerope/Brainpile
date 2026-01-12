@@ -19,8 +19,9 @@ const globalLoadedImageUrls = new Set<string>();
 
 function markImageLoaded(url: string | null | undefined, setLoadedImages: React.Dispatch<React.SetStateAction<Set<string>>>) {
   if (!url) return;
-  if (globalLoadedImageUrls.has(url)) return;
-  globalLoadedImageUrls.add(url);
+  if (!globalLoadedImageUrls.has(url)) {
+    globalLoadedImageUrls.add(url);
+  }
   setLoadedImages((prev) => {
     if (prev.has(url)) return prev;
     const next = new Set(prev);
@@ -179,6 +180,12 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
                               alt="Full content"
                               className="modal-media"
                               loading="eager"
+                              ref={(img) => {
+                                if (!img) return;
+                                if (img.complete && img.naturalWidth > 0) {
+                                  markImageLoaded(url, setLoadedImages);
+                                }
+                              }}
                               onLoad={() => markImageLoaded(url, setLoadedImages)}
                             />
                             {!isLoaded && (

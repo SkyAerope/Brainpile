@@ -4,6 +4,7 @@ import { fetchItems, searchItems, Item } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
 import { groupItemsForGrid } from '../groupItems';
+import { mergeUniqueItemsById, uniqueItemsById } from '../itemList';
 
 export const TimelinePage: React.FC = () => {
     const [searchParams] = useSearchParams();
@@ -45,7 +46,7 @@ export const TimelinePage: React.FC = () => {
                 const data = await fetchItems(cursorSnapshot, 'timeline', undefined, null, controller.signal);
 
                 if (requestSeqRef.current !== requestSeq) return;
-                setItems(prev => reset ? data.items : [...prev, ...data.items]);
+                setItems((prev) => (reset ? uniqueItemsById(data.items) : mergeUniqueItemsById(prev, data.items)));
                 setCursor(data.next_cursor);
             }
         } catch (e) { 
