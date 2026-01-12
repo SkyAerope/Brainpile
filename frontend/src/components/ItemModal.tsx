@@ -134,8 +134,172 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
 
   const effectiveContent = albumCaption ?? detail.content;
 
+  const infoSection = (
+    <div className="modal-info-panel">
+      <h2>{detail.type.toUpperCase()} Item</h2>
+      <div className="meta-row">
+        <div className="meta-item">
+          <Calendar size={16} />
+          <span>{detail.created_at ? new Date(detail.created_at).toLocaleString() : 'N/A'}</span>
+        </div>
+        {detail.tg_link && (
+          <a href={detail.tg_link} target="_blank" rel="noopener noreferrer" className="meta-item link">
+            <ExternalLink size={16} />
+            <span>Open in Telegram</span>
+          </a>
+        )}
+      </div>
+
+      <div className="detail-section">
+        <h3>Content</h3>
+        <p className="content-text">{effectiveContent || 'No content'}</p>
+      </div>
+
+      {!!detail.tag_objects?.length && (
+        <div className="detail-section">
+          <h3>Tags</h3>
+          <div className="modal-tags">
+            {detail.tag_objects.map((tag) => (
+              <span key={tag.id} className="modal-tag-pill" title={tag.label ?? undefined}>
+                <TagIcon tag={tag} size={18} title={tag.label ?? undefined} />
+                {tag.label && <span className="modal-tag-label">{tag.label}</span>}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {detail.searchable_text && detail.searchable_text !== detail.content && (
+        <div className="detail-section">
+          <h3>AI Analysis / OCR</h3>
+          <p className="content-text secondary">{detail.searchable_text}</p>
+        </div>
+      )}
+
+      <div className="detail-section">
+        <h3>Metadata</h3>
+        <pre className="json-block">{JSON.stringify(detail.meta, null, 2)}</pre>
+      </div>
+
+      <div className="modal-actions">
+        <button className="btn btn-delete" onClick={() => setShowConfirm(true)}>
+          <Trash2 size={16} /> Delete
+        </button>
+        <a 
+          href={`/api/v1/items/${currentItemId}/raw`} 
+          target="_blank" 
+          rel="noreferrer"
+          className="btn btn-secondary" 
+          style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          <Download size={16} />
+          Download Raw
+        </a>
+      </div>
+    </div>
+  );
+
+  const isText = detail.type === 'text';
+
+  const mediaSection = !isText && (
+    <div className="modal-left">
+      {/* Media Preview */}
+      <div className="modal-slider">
+        <div
+          className="modal-track"
+          style={{
+            transform: `translateX(${-activeIndex * 100}%)`,
+            transition: canNavigate ? `transform ${ANIMATION_DURATION}ms cubic-bezier(0.33, 0.33, 0, 1)` : undefined,
+          }}
+        >
+          {(album ? album : [detail]).map((it: any) => {
+            const type = (it.type ?? detail.type) as string;
+            const url = (it.s3_url ?? detail.s3_url) as string | null | undefined;
+
+            const isLoaded = url
+              ? (loadedImages.has(url) || globalLoadedImageUrls.has(url))
+              : true;
+
+            return (
+              <div key={it.id ?? itemId} className="modal-slide">
+                {type === 'video' && url ? (
+                  <video controls src={url} className="modal-media" />
+                ) : type === 'image' && url ? (
+                  <>
+                    <img
+                      src={url}
+                      alt="Full content"
+                      className="modal-media"
+                      loading="eager"
+                      ref={(img) => {
+                        if (!img) return;
+                        if (img.complete && img.naturalWidth > 0) {
+                          markImageLoaded(url, setLoadedImages);
+                        }
+                      }}
+                      onLoad={() => markImageLoaded(url, setLoadedImages)}
+                    />
+                    {!isLoaded && (
+                      <div className="modal-placeholder">
+                        <ImageIcon size={64} />
+                        <p>Loading...</p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="modal-placeholder">
+                    {detail.type === 'text' ? <FileText size={64} /> : <ImageIcon size={64} />}
+                    <p>No Media Preview</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {canNavigate && (
+        <>
+          <button
+            type="button"
+            className="modal-album-arrow left"
+            aria-label="Previous"
+            onClick={(e) => {
+              e.stopPropagation();
+              goPrev();
+            }}
+          >
+            <ChevronLeft size={24} />
+          </button>
+          <button
+            type="button"
+            className="modal-album-arrow right"
+            aria-label="Next"
+            onClick={(e) => {
+              e.stopPropagation();
+              goNext();
+            }}
+          >
+            <ChevronRight size={24} />
+          </button>
+          <div className="modal-album-dots" aria-label={`Album with ${albumCount} items`}>
+            {Array.from({ length: albumCount }).map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                className={`modal-album-dot ${i === activeIndex ? 'active' : ''}`}
+                aria-label={`Go to item ${i + 1}`}
+                onClick={(e) => handleDotClick(e, i)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className={`modal-overlay ${!isText ? 'media-mode' : ''}`} onClick={onClose}>
       {showConfirm && (
         <ConfirmModal 
             title="Delete Item"
@@ -146,165 +310,23 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
             onCancel={() => setShowConfirm(false)}
         />
       )}
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <button className="close-btn" onClick={onClose}><X size={24} /></button>
-        
-        <div className="modal-body">
-          {detail.type !== 'text' && (
-            <div className="modal-left">
-              {/* Media Preview */}
-              <div className="modal-slider">
-                <div
-                  className="modal-track"
-                  style={{
-                    transform: `translateX(${-activeIndex * 100}%)`,
-                    transition: canNavigate ? `transform ${ANIMATION_DURATION}ms cubic-bezier(0.33, 0.33, 0, 1)` : undefined,
-                  }}
-                >
-                  {(album ? album : [detail]).map((it: any) => {
-                    const type = (it.type ?? detail.type) as string;
-                    const url = (it.s3_url ?? detail.s3_url) as string | null | undefined;
-
-                    const isLoaded = url
-                      ? (loadedImages.has(url) || globalLoadedImageUrls.has(url))
-                      : true;
-
-                    return (
-                      <div key={it.id ?? itemId} className="modal-slide">
-                        {type === 'video' && url ? (
-                          <video controls src={url} className="modal-media" />
-                        ) : type === 'image' && url ? (
-                          <>
-                            <img
-                              src={url}
-                              alt="Full content"
-                              className="modal-media"
-                              loading="eager"
-                              ref={(img) => {
-                                if (!img) return;
-                                if (img.complete && img.naturalWidth > 0) {
-                                  markImageLoaded(url, setLoadedImages);
-                                }
-                              }}
-                              onLoad={() => markImageLoaded(url, setLoadedImages)}
-                            />
-                            {!isLoaded && (
-                              <div className="modal-placeholder">
-                                <ImageIcon size={64} />
-                                <p>Loading...</p>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="modal-placeholder">
-                            {detail.type === 'text' ? <FileText size={64} /> : <ImageIcon size={64} />}
-                            <p>No Media Preview</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {canNavigate && (
-                <>
-                  <button
-                    type="button"
-                    className="modal-album-arrow left"
-                    aria-label="Previous"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      goPrev();
-                    }}
-                  >
-                    <ChevronLeft size={24} />
-                  </button>
-                  <button
-                    type="button"
-                    className="modal-album-arrow right"
-                    aria-label="Next"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      goNext();
-                    }}
-                  >
-                    <ChevronRight size={24} />
-                  </button>
-                  <div className="modal-album-dots" aria-label={`Album with ${albumCount} items`}>
-                    {Array.from({ length: albumCount }).map((_, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        className={`modal-album-dot ${i === activeIndex ? 'active' : ''}`}
-                        aria-label={`Go to item ${i + 1}`}
-                        onClick={(e) => handleDotClick(e, i)}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            )}
-            
-            <div className="modal-right" style={detail.type === 'text' ? { borderLeft: 'none' } : undefined}>
-                <h2>{detail.type.toUpperCase()} Item</h2>
-                <div className="meta-row">
-                    <div className="meta-item">
-                        <Calendar size={16} />
-                        <span>{detail.created_at ? new Date(detail.created_at).toLocaleString() : 'N/A'}</span>
-                    </div>
-                    {detail.tg_link && (
-                        <a href={detail.tg_link} target="_blank" rel="noopener noreferrer" className="meta-item link">
-                            <ExternalLink size={16} />
-                            <span>Open in Telegram</span>
-                        </a>
-                    )}
-                </div>
-
-                <div className="detail-section">
-                    <h3>Content</h3>
-                  <p className="content-text">{effectiveContent || 'No content'}</p>
-                </div>
-
-                {!!detail.tag_objects?.length && (
-                  <div className="detail-section">
-                    <h3>Tags</h3>
-                    <div className="modal-tags">
-                      {detail.tag_objects.map((tag) => (
-                        <span key={tag.id} className="modal-tag-pill" title={tag.label ?? undefined}>
-                          <TagIcon tag={tag} size={18} title={tag.label ?? undefined} />
-                          {tag.label && <span className="modal-tag-label">{tag.label}</span>}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {detail.searchable_text && detail.searchable_text !== detail.content && (
-                     <div className="detail-section">
-                        <h3>AI Analysis / OCR</h3>
-                        <p className="content-text secondary">{detail.searchable_text}</p>
-                    </div>
-                )}
-
-                <div className="detail-section">
-                    <h3>Metadata</h3>
-                    <pre className="json-block">{JSON.stringify(detail.meta, null, 2)}</pre>
-                </div>
-
-                <div className="modal-actions">
-                    <button className="btn btn-delete" onClick={() => setShowConfirm(true)}>
-                      <Trash2 size={16} /> Delete
-                    </button>
-                    <a href={`/api/v1/items/${currentItemId}/raw`} target="_blank" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Download size={16} />
-                      Download Raw
-                    </a>
-                </div>
-            </div>
+      
+      {isText ? (
+        <div className="modal-content text-item" onClick={e => e.stopPropagation()}>
+          <button className="close-btn" onClick={onClose}><X size={24} /></button>
+          <div className="modal-body">
+            {infoSection}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="modal-content media-item" onClick={e => e.stopPropagation()}>
+          <button className="close-btn floating" onClick={onClose}><X size={24} /></button>
+          <div className="modal-body">
+            {mediaSection}
+            {infoSection}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

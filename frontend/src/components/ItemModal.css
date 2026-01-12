@@ -12,6 +12,11 @@
   padding: 20px;
 }
 
+.modal-overlay.media-mode {
+  padding: 0;
+  background: rgba(0, 0, 0, 0.95);
+}
+
 .modal-loading {
     color: white;
     font-size: 1.2rem;
@@ -29,6 +34,15 @@
   overflow: hidden;
 }
 
+.modal-content.media-item {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  background: transparent;
+}
+
 .close-btn {
   position: absolute;
   top: 15px;
@@ -42,10 +56,23 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  z-index: 10;
+  z-index: 1010;
 }
 .close-btn:hover {
     background: rgba(0,0,0,0.2);
+}
+
+.close-btn.floating {
+  position: fixed;
+  top: 20px;
+  right: 420px;
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  width: 44px;
+  height: 44px;
+}
+.close-btn.floating:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .modal-body {
@@ -53,6 +80,11 @@
   flex-direction: column;
   height: 100%;
   overflow-y: auto;
+}
+
+.modal-content.media-item .modal-body {
+  flex-direction: row;
+  overflow: hidden;
 }
 
 @media (min-width: 768px) {
@@ -70,6 +102,12 @@
   min-height: 300px;
   position: relative;
   overflow: hidden;
+}
+
+.modal-content.media-item .modal-left {
+  flex: 1;
+  background: transparent;
+  min-height: auto;
 }
 
 /* 图片滑动容器 */
@@ -251,14 +289,23 @@
   pointer-events: none;
 }
 
-.modal-right {
+.modal-info-panel {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
-  border-left: 1px solid var(--border-color);
 }
 
-.modal-right h2 {
+.modal-content.media-item .modal-info-panel {
+  width: 400px;
+  flex: 0 0 400px;
+  background: white;
+  height: 100%;
+  border-left: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 40px 24px 80px 24px;
+  box-shadow: -5px 0 15px rgba(0,0,0,0.1);
+}
+
+.modal-info-panel h2 {
   margin-top: 0;
   font-size: 1.5rem;
 }
@@ -382,4 +429,26 @@
 
 .btn-secondary:hover {
     background-color: #e2e2e2;
+}
+
+@media (max-width: 767px) {
+  .modal-content.media-item .modal-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  
+  .modal-content.media-item .modal-info-panel {
+    width: 100%;
+    flex: none;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid rgba(0,0,0,0.1);
+    padding: 24px;
+    box-shadow: 0 -5px 15px rgba(0,0,0,0.05);
+  }
+
+  .close-btn.floating {
+    right: 20px;
+    background: rgba(0, 0, 0, 0.3);
+  }
 }
