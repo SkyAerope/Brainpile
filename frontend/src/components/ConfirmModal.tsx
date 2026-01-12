@@ -35,11 +35,11 @@ export const ConfirmModal: React.FC<Props> = ({
           <p>{message}</p>
         </div>
         <div className="confirm-modal-footer">
-          <button className="btn-cancel" onClick={onCancel}>
+          <button className="btn btn-secondary" onClick={onCancel}>
             {cancelLabel}
           </button>
           <button 
-            className={`btn-confirm ${isDanger ? 'danger' : ''}`} 
+            className={`btn ${isDanger ? 'btn-danger' : ''}`} 
             onClick={onConfirm}
           >
             {confirmLabel}

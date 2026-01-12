@@ -185,7 +185,7 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
       </div>
 
       <div className="modal-actions">
-        <button className="btn btn-delete" onClick={() => setShowConfirm(true)}>
+        <button className="btn btn-danger" onClick={() => setShowConfirm(true)}>
           <Trash2 size={16} /> Delete
         </button>
         {!isText && (
@@ -194,7 +194,6 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
             target="_blank" 
             rel="noreferrer"
             className="btn btn-secondary" 
-            style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}
           >
             <Download size={16} />
             Download Raw

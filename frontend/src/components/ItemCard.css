@@ -202,7 +202,7 @@
   border-radius: 999px;
   border: none;
   background: rgba(255, 255, 255, 0.9);
-  color: #111;
+  color: var(--text-primary);
   font-size: 22px;
   line-height: 1;
   display: flex;
@@ -267,7 +267,7 @@
 .view-btn {
   align-self: flex-end;
   background: var(--accent-color);
-  color: white;
+  color: var(--text-in-dark-bg);
   border: none;
   border-radius: 24px;
   padding: 10px 16px;
@@ -279,13 +279,13 @@
 }
 
 .view-btn:hover {
-  background: #678070;
+  background: var(--darker-accent-color);
 }
 
 .source-link {
   align-self: flex-start; /* Bottom-left usually for source link */
   background: rgba(255, 255, 255, 0.9);
-  color: #111;
+  color: var(--text-primary);
   text-decoration: none;
   border-radius: 14px;
   padding: 6px 10px;
@@ -312,7 +312,7 @@
   margin: 0;
   font-size: 14px;
   font-weight: 500;
-  color: #111;
+  color: var(--text-primary);
   line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
@@ -371,12 +371,12 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #111;
+  color: var(--text-primary);
   transition: background 0.2s;
 }
 
 .more-btn:hover {
-  background: #f0f0f0;
+  background: var(--card-bg);
 }
 
 .dropdown-menu {
@@ -384,7 +384,7 @@
   bottom: 100%; /* 打开位置在按钮上方 */
   right: 0;
   width: 240px;
-  background: white;
+  background: var(--bg-color);
   border-radius: 16px;
   box-shadow: 0 0 20px rgba(0,0,0,0.15);
   padding: 8px;
@@ -415,12 +415,12 @@
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
-  color: #111;
+  color: var(--text-primary);
   transition: background 0.2s;
 }
 
 .dropdown-item:hover {
-  background: #f0f0f0;
+  background: var(--card-bg);
 }
 
 /* .dropdown-item if no image */
@@ -435,7 +435,7 @@
   color: #ccc;
 }
 
-/* Text Item specific style (when type is "text") */
+/* Text Item 弹窗 */
 .item-card.type-text .item-media-placeholder {
   background: var(--card-bg);
   border-radius: 16px;
@@ -446,10 +446,10 @@
 }
 
 .item-card.type-text .text-title {
-  color: #111;
+  color: var(--text-primary);
   font-size: 16px;
   font-weight: 400;
-  -webkit-line-clamp: 9; /* 纯文字卡片展示更多行数 */
+  -webkit-line-clamp: 9; /* 纯文字卡片行数设定 */
   line-clamp: 9;
 }
 
@@ -457,7 +457,7 @@
   padding: 8px 4px 0 4px;
 }
 
-/* 针对纯图片（无 content）的处理 */
+/* 纯图片不展示content */
 .item-card:not(.type-text) .item-content:empty {
     display: none;
 }

@@ -14,7 +14,7 @@
 }
 
 .confirm-modal-content {
-  background: white;
+  background: var(--bg-color);
   width: 90%;
   max-width: 400px;
   border-radius: 20px;
@@ -49,7 +49,7 @@
 }
 
 .confirm-modal-close:hover {
-  background: #f0f0f0;
+  background: var(--card-bg);
 }
 
 .confirm-modal-header {
@@ -63,17 +63,17 @@
   margin: 0;
   font-size: 20px;
   font-weight: 700;
-  color: #111;
+  color: var(--text-primary);
 }
 
 .danger-icon {
-  color: #ff4d4f;
+  color: var(--danger-color);
 }
 
 .confirm-modal-body p {
   margin: 0 0 24px 0;
   font-size: 15px;
-  color: #555;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 
@@ -81,44 +81,4 @@
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-}
-
-.btn-cancel {
-  padding: 10px 20px;
-  border-radius: 24px;
-  border: none;
-  background: #efefef;
-  color: #111;
-  font-weight: 700;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.btn-cancel:hover {
-  background: #e2e2e2;
-}
-
-.btn-confirm {
-  padding: 10px 20px;
-  border-radius: 24px;
-  border: none;
-  background: #0076d3;
-  color: white;
-  font-weight: 700;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.btn-confirm:hover {
-  background: #00569a;
-}
-
-.btn-confirm.danger {
-  background: #ff4d4f;
-}
-
-.btn-confirm.danger:hover {
-  background: #d9363e;
 }

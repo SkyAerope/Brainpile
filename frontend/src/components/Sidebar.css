@@ -8,8 +8,8 @@
   flex-direction: column;
   align-items: center;
   padding: 20px 0;
-  background: white;
-  border-right: 1px solid #efefef;
+  background: var(--bg-color);
+  border-right: 1px solid var(--border-color);
   z-index: 100;
 }
 
@@ -33,17 +33,17 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #111;
+  color: var(--text-primary);
   transition: background 0.2s;
 }
 
 .nav-item:hover {
-  background: #f0f0f0;
+  background: var(--card-bg);
 }
 
 .nav-item.active {
-  background: #111;
-  color: white;
+  background: var(--text-primary);
+  color: var(--text-in-dark-bg);
 }
 
 .sidebar-footer {
