@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Item } from '../api';
 import { ItemCard } from './ItemCard';
-import { Masonry } from 'masonic';
+import { useContainerPosition, useMasonry, usePositioner, useResizeObserver } from 'masonic';
 import type { RenderComponentProps } from 'masonic';
 
 function isValidItem(value: unknown): value is Item {
@@ -41,6 +41,62 @@ function getColumnCount(width: number) {
   return 5;
 }
 
+function useScrollContainerMetrics(selector: string) {
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
+  const [metrics, setMetrics] = useState<{ scrollTop: number; height: number; isScrolling: boolean }>({
+    scrollTop: 0,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+    isScrolling: false,
+  });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const el = document.querySelector(selector) as HTMLElement | null;
+    setScrollEl(el);
+    if (!el) return;
+
+    let rafId: number | null = null;
+    let scrollingTimeoutId: number | null = null;
+
+    const read = (isScrolling: boolean) => {
+      setMetrics({
+        scrollTop: el.scrollTop,
+        height: el.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 800),
+        isScrolling,
+      });
+    };
+
+    const onScroll = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        read(true);
+      });
+
+      if (scrollingTimeoutId !== null) {
+        window.clearTimeout(scrollingTimeoutId);
+      }
+      scrollingTimeoutId = window.setTimeout(() => read(false), 140);
+    };
+
+    const onResize = () => read(false);
+
+    read(false);
+    el.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+      if (scrollingTimeoutId !== null) window.clearTimeout(scrollingTimeoutId);
+    };
+  }, [selector]);
+
+  return { scrollEl, ...metrics };
+}
+
 export const MasonryGrid: React.FC<MasonryGridProps> = ({
   items,
   layoutKey,
@@ -51,6 +107,9 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   onLoadMore,
 }) => {
   const windowWidth = useWindowWidth();
+
+  const containerRef = useRef<HTMLElement | null>(null);
+  const { scrollEl, scrollTop, height, isScrolling } = useScrollContainerMetrics('.main-scroll');
 
   // Masonic caches layout by index; if the items array shrinks (e.g. delete/reset/query switch),
   // it may render with stale indices before any effects run. Detect shrink synchronously and
@@ -69,23 +128,35 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   const contentWidth = isDrawerPage ? windowWidth - 440 : windowWidth - 80;
   const columnCount = getColumnCount(contentWidth);
 
+  const containerPosition = useContainerPosition(containerRef, [windowWidth, isDrawerPage, columnCount]);
+  const positioner = usePositioner(
+    {
+      width: containerPosition.width,
+      columnCount,
+      columnGutter: 16,
+      rowGutter: 16,
+    },
+    [containerPosition.width, columnCount, shrinkNonce, layoutKey]
+  );
+  const resizeObserver = useResizeObserver(positioner);
+
   const loaderRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (loading || !hasMore) return;
-    
+
     const obs = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
         onLoadMore();
       }
-    }, { rootMargin: '400px' }); 
+    }, { root: scrollEl ?? null, rootMargin: '400px' }); 
 
     if (loaderRef.current) {
       obs.observe(loaderRef.current);
     }
     
     return () => obs.disconnect();
-  }, [loading, hasMore, onLoadMore]);
+  }, [loading, hasMore, onLoadMore, scrollEl]);
 
   const renderCard = useCallback(
     ({ data }: RenderComponentProps<Item>) => {
@@ -101,19 +172,24 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     [onItemClick, onItemDelete]
   );
 
+  const masonry = useMasonry<Item>({
+    containerRef,
+    className: 'my-masonry-grid',
+    items: safeItems,
+    positioner,
+    resizeObserver,
+    scrollTop,
+    height,
+    isScrolling,
+    itemHeightEstimate: 320,
+    itemKey: (data) => data.id,
+    render: renderCard,
+    overscanBy: 2,
+  });
+
   return (
     <>
-      <Masonry
-        key={`${layoutKey ?? 'default'}:${shrinkNonce}`}
-        className="my-masonry-grid"
-        items={safeItems}
-        columnCount={columnCount}
-        columnGutter={16}
-        rowGutter={16}
-        itemKey={(data, index) => (data ? `${data.id}:${index}` : `missing-${index}`)}
-        itemHeightEstimate={320}
-        render={renderCard}
-      />
+      <React.Fragment key={`${layoutKey ?? 'default'}:${shrinkNonce}`}>{masonry}</React.Fragment>
       {(loading || hasMore) && (
         <div ref={loaderRef} style={{ padding: '2rem', textAlign: 'center' }}>
           <button 
