@@ -69,6 +69,96 @@
   justify-content: center;
   min-height: 300px;
   position: relative;
+  overflow: hidden;
+}
+
+/* 图片滑动容器 */
+.modal-slider {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-slide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 点击右箭头：旧图往左滑出 */
+.modal-slide.modal-slide-out-left {
+  animation: modalSlideOutLeft 0.3s cubic-bezier(0.33, 0.33, 0, 1) forwards;
+  z-index: 1;
+}
+
+/* 点击右箭头：新图从右滑入 */
+.modal-slide.modal-slide-in-left {
+  animation: modalSlideInFromRight 0.3s cubic-bezier(0.33, 0.33, 0, 1) forwards;
+  z-index: 2;
+}
+
+/* 点击左箭头：旧图往右滑出 */
+.modal-slide.modal-slide-out-right {
+  animation: modalSlideOutRight 0.3s cubic-bezier(0.33, 0.33, 0, 1) forwards;
+  z-index: 1;
+}
+
+/* 点击左箭头：新图从左滑入 */
+.modal-slide.modal-slide-in-right {
+  animation: modalSlideInFromLeft 0.3s cubic-bezier(0.33, 0.33, 0, 1) forwards;
+  z-index: 2;
+}
+
+@keyframes modalSlideOutLeft {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 1;
+  }
+}
+
+@keyframes modalSlideInFromRight {
+  from {
+    transform: translateX(100%);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes modalSlideOutRight {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 1;
+  }
+}
+
+@keyframes modalSlideInFromLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 .modal-media {

@@ -13,10 +13,20 @@ interface Props {
   onDeleted: (id: number) => void;
 }
 
+const ANIMATION_DURATION = 300;
+
 export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onClose, onDeleted }) => {
-  const [detail, setDetail] = useState<ItemDetail | null>(null);
+  // 所有组图项的详情缓存
+  const [detailsCache, setDetailsCache] = useState<Map<number, ItemDetail>>(new Map());
   const [loading, setLoading] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // 跟踪图片加载状态
+  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
+
+  // 动画状态：保存上一张图的索引和滑动方向
+  const [prevIndex, setPrevIndex] = useState<number | null>(null);
+  const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('left');
 
   const album = useMemo(() => (groupItems && groupItems.length > 1 ? groupItems : null), [groupItems]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -36,6 +46,11 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
     return album[Math.min(activeIndex, album.length - 1)];
   }, [album, activeIndex]);
 
+  const prevPreviewItem = useMemo(() => {
+    if (!album || prevIndex === null) return null;
+    return album[Math.min(prevIndex, album.length - 1)];
+  }, [album, prevIndex]);
+
   const albumCaption = useMemo(() => {
     if (!album) return null;
     for (const it of album) {
@@ -44,14 +59,66 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
     return null;
   }, [album]);
 
+  // 预加载所有组图图片
+  const allImageUrls = useMemo(() => {
+    if (!album) {
+      // 单张图片
+      const singleItem = groupItems?.[0];
+      const url = singleItem?.s3_url;
+      return url ? [url] : [];
+    }
+    return album
+      .filter((it) => it.type === 'image' || it.type === 'video')
+      .map((it) => it.s3_url)
+      .filter((url): url is string => !!url);
+  }, [album, groupItems]);
+
   useEffect(() => {
-    // Avoid flashing a full-screen Loading overlay when switching within an album.
-    if (!detail) setLoading(true);
-    fetchItemDetail(currentItemId)
-      .then(setDetail)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [currentItemId]);
+    // 预加载所有图片
+    allImageUrls.forEach((url) => {
+      if (loadedImages.has(url)) return;
+      const img = new Image();
+      img.onload = () => {
+        setLoadedImages((prev) => new Set(prev).add(url));
+      };
+      img.src = url;
+    });
+  }, [allImageUrls]);
+
+  // 一次性加载所有组图项的详情
+  useEffect(() => {
+    const idsToFetch = album ? album.map((it) => it.id) : [itemId];
+    setLoading(true);
+
+    Promise.all(
+      idsToFetch.map((id) =>
+        fetchItemDetail(id)
+          .then((detail) => ({ id, detail }))
+          .catch((err) => {
+            console.error(`Failed to fetch detail for item ${id}:`, err);
+            return null;
+          })
+      )
+    ).then((results) => {
+      const newCache = new Map<number, ItemDetail>();
+      results.forEach((r) => {
+        if (r && r.detail) {
+          newCache.set(r.id, r.detail);
+        }
+      });
+      setDetailsCache(newCache);
+      setLoading(false);
+    });
+  }, [album, itemId]);
+
+  // 当前显示项的详情
+  const detail = detailsCache.get(currentItemId) ?? null;
+
+  // 当前图片是否已加载
+  const currentImageUrl = previewItem?.s3_url ?? detail?.s3_url;
+  const prevImageUrl = prevPreviewItem?.s3_url ?? null;
+  const isCurrentImageLoaded = currentImageUrl ? loadedImages.has(currentImageUrl) : true;
+  const isPrevImageLoaded = prevImageUrl ? loadedImages.has(prevImageUrl) : true;
 
   const handleDelete = async () => {
     try {
@@ -65,16 +132,38 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
 
   const albumCount = album?.length ?? 0;
   const canNavigate = albumCount > 1;
-  const goPrev = () => {
-    if (!album) return;
-    setActiveIndex((prev) => (prev - 1 + album.length) % album.length);
-  };
-  const goNext = () => {
-    if (!album) return;
-    setActiveIndex((prev) => (prev + 1) % album.length);
+
+  // 切换到指定索引
+  const switchTo = (newIndex: number, direction: 'left' | 'right') => {
+    if (newIndex === activeIndex || prevIndex !== null || !album) return;
+    setPrevIndex(activeIndex);
+    setSlideDirection(direction);
+    setActiveIndex(newIndex);
+    setTimeout(() => {
+      setPrevIndex(null);
+    }, ANIMATION_DURATION);
   };
 
-  if (loading && !detail) return <div className="modal-overlay"><div className="modal-loading">Loading...</div></div>;
+  const goPrev = () => {
+    if (!album || prevIndex !== null) return;
+    const newIndex = (activeIndex - 1 + album.length) % album.length;
+    switchTo(newIndex, 'right');
+  };
+
+  const goNext = () => {
+    if (!album || prevIndex !== null) return;
+    const newIndex = (activeIndex + 1) % album.length;
+    switchTo(newIndex, 'left');
+  };
+
+  const handleDotClick = (e: React.MouseEvent, targetIndex: number) => {
+    e.stopPropagation();
+    if (targetIndex === activeIndex || prevIndex !== null || !album) return;
+    const direction = targetIndex > activeIndex ? 'left' : 'right';
+    switchTo(targetIndex, direction);
+  };
+
+  if (loading && detailsCache.size === 0) return <div className="modal-overlay"><div className="modal-loading">Loading...</div></div>;
   if (!detail) return null;
 
   const effectiveContent = albumCaption ?? detail.content;
@@ -98,18 +187,40 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
           {detail.type !== 'text' && (
             <div className="modal-left">
               {/* Media Preview */}
-              {(previewItem?.s3_url || detail.s3_url) && (
-                (previewItem?.type ?? detail.type) === 'video' ? (
-                  <video controls src={(previewItem?.s3_url ?? detail.s3_url) as string} className="modal-media" />
-                ) : ((previewItem?.type ?? detail.type) === 'image' ? (
-                  <img src={(previewItem?.s3_url ?? detail.s3_url) as string} alt="Full content" className="modal-media" />
-                ) : null)
-              ) || (
-                <div className="modal-placeholder">
-                      {detail.type === 'text' ? <FileText size={64} /> : <ImageIcon size={64} />}
-                      <p>No Media Preview</p>
+              <div className="modal-slider">
+                {/* 上一张图（滑出） */}
+                {prevIndex !== null && prevImageUrl && isPrevImageLoaded && (
+                  <div className={`modal-slide modal-slide-out-${slideDirection}`}>
+                    {prevPreviewItem?.type === 'video' ? (
+                      <video src={prevImageUrl} className="modal-media" />
+                    ) : (
+                      <img src={prevImageUrl} alt="Previous" className="modal-media" />
+                    )}
+                  </div>
+                )}
+                {/* 当前图（滑入或静止） */}
+                <div className={`modal-slide ${prevIndex !== null ? `modal-slide-in-${slideDirection}` : ''}`}>
+                  {isCurrentImageLoaded ? (
+                    (previewItem?.s3_url || detail.s3_url) && (
+                      (previewItem?.type ?? detail.type) === 'video' ? (
+                        <video controls src={(previewItem?.s3_url ?? detail.s3_url) as string} className="modal-media" />
+                      ) : ((previewItem?.type ?? detail.type) === 'image' ? (
+                        <img src={(previewItem?.s3_url ?? detail.s3_url) as string} alt="Full content" className="modal-media" />
+                      ) : null)
+                    ) || (
+                      <div className="modal-placeholder">
+                        {detail.type === 'text' ? <FileText size={64} /> : <ImageIcon size={64} />}
+                        <p>No Media Preview</p>
+                      </div>
+                    )
+                  ) : (
+                    <div className="modal-placeholder">
+                      <ImageIcon size={64} />
+                      <p>Loading...</p>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
 
               {canNavigate && (
                 <>
@@ -142,10 +253,7 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
                         type="button"
                         className={`modal-album-dot ${i === activeIndex ? 'active' : ''}`}
                         aria-label={`Go to item ${i + 1}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveIndex(i);
-                        }}
+                        onClick={(e) => handleDotClick(e, i)}
                       />
                     ))}
                   </div>

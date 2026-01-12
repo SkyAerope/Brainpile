@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Item, deleteItem } from '../api';
 import './ItemCard.css';
 import { ChevronLeft, ChevronRight, ExternalLink, Image as ImageIcon, MoreHorizontal, Download, Trash2, Send } from 'lucide-react';
@@ -11,6 +11,8 @@ interface Props {
   onDeleted?: (id: number) => void;
 }
 
+const ANIMATION_DURATION = 300;
+
 export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -20,6 +22,47 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   const isAlbum = groupCount > 1;
 
   const [activeIndex, setActiveIndex] = useState(0);
+  // 保存上一张图的索引，用于滑出动画
+  const [prevIndex, setPrevIndex] = useState<number | null>(null);
+  // 滑动方向：'left' = 点击右箭头，图往左滑；'right' = 点击左箭头，图往右滑
+  const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('left');
+
+  // 跟踪每张图片的加载状态
+  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
+
+  // 预加载组图内所有图片
+  const allImageUrls = useMemo(() => {
+    if (!isAlbum || !item.group_items) return [];
+    return item.group_items
+      .filter((it) => it.type === 'image' || it.type === 'video')
+      .map((it) => it.thumbnail_url || it.s3_url)
+      .filter((url): url is string => !!url);
+  }, [isAlbum, item.group_items]);
+
+  useEffect(() => {
+    // 预加载所有图片
+    allImageUrls.forEach((url) => {
+      if (loadedImages.has(url)) return;
+      const img = new Image();
+      img.onload = () => {
+        setLoadedImages((prev) => new Set(prev).add(url));
+      };
+      img.src = url;
+    });
+  }, [allImageUrls]);
+
+  // 单张图片也需要跟踪加载状态
+  useEffect(() => {
+    if (isAlbum) return;
+    const url = item.thumbnail_url || item.s3_url;
+    if (!url || loadedImages.has(url)) return;
+    const img = new Image();
+    img.onload = () => {
+      setLoadedImages((prev) => new Set(prev).add(url));
+    };
+    img.src = url;
+  }, [isAlbum, item.thumbnail_url, item.s3_url]);
+
   useEffect(() => {
     if (!isAlbum) {
       setActiveIndex(0);
@@ -29,6 +72,13 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
   }, [isAlbum, groupCount, item.id]);
 
   const displayItem = isAlbum ? item.group_items![activeIndex] : item;
+  const prevDisplayItem = isAlbum && prevIndex !== null ? item.group_items![prevIndex] : null;
+
+  const currentImageUrl = displayItem.thumbnail_url || displayItem.s3_url;
+  const prevImageUrl = prevDisplayItem ? (prevDisplayItem.thumbnail_url || prevDisplayItem.s3_url) : null;
+  const isCurrentImageLoaded = currentImageUrl ? loadedImages.has(currentImageUrl) : true;
+  const isPrevImageLoaded = prevImageUrl ? loadedImages.has(prevImageUrl) : true;
+
   const aspectRatio =
     displayItem.width && displayItem.height ? displayItem.width / displayItem.height : undefined;
 
@@ -63,16 +113,37 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
     onClick(item);
   };
 
+  // 切换到指定索引
+  const switchTo = (newIndex: number, direction: 'left' | 'right') => {
+    if (newIndex === activeIndex || prevIndex !== null) return;
+    setPrevIndex(activeIndex);
+    setSlideDirection(direction);
+    setActiveIndex(newIndex);
+    // 动画结束后清除 prevIndex
+    setTimeout(() => {
+      setPrevIndex(null);
+    }, ANIMATION_DURATION);
+  };
+
   const handlePrev = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isAlbum) return;
-    setActiveIndex((prev) => (prev - 1 + groupCount) % groupCount);
+    if (!isAlbum || prevIndex !== null) return;
+    const newIndex = (activeIndex - 1 + groupCount) % groupCount;
+    switchTo(newIndex, 'right');
   };
 
   const handleNext = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isAlbum) return;
-    setActiveIndex((prev) => (prev + 1) % groupCount);
+    if (!isAlbum || prevIndex !== null) return;
+    const newIndex = (activeIndex + 1) % groupCount;
+    switchTo(newIndex, 'left');
+  };
+
+  const handleDotClick = (e: React.MouseEvent, targetIndex: number) => {
+    e.stopPropagation();
+    if (targetIndex === activeIndex || prevIndex !== null) return;
+    const direction = targetIndex > activeIndex ? 'left' : 'right';
+    switchTo(targetIndex, direction);
   };
 
   return (
@@ -98,7 +169,24 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
           style={aspectRatio ? { aspectRatio: `${aspectRatio}` } : undefined}
         >
           {displayItem.s3_url && (displayItem.type === 'image' || displayItem.type === 'video') ? (
-            <img src={displayItem.thumbnail_url || displayItem.s3_url} alt="content" loading="lazy" />
+            <div className="album-slider">
+              {/* 上一张图（滑出） */}
+              {prevIndex !== null && prevImageUrl && isPrevImageLoaded && (
+                <div className={`album-slide slide-out-${slideDirection}`}>
+                  <img src={prevImageUrl} alt="content" />
+                </div>
+              )}
+              {/* 当前图（滑入或静止） */}
+              <div className={`album-slide ${prevIndex !== null ? `slide-in-${slideDirection}` : ''}`}>
+                {isCurrentImageLoaded ? (
+                  <img src={currentImageUrl!} alt="content" />
+                ) : (
+                  <div className="image-loading-placeholder">
+                    <ImageIcon size={32} />
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="placeholder">
               <ImageIcon size={48} />
@@ -120,10 +208,7 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
                     type="button"
                     className={`album-dot ${i === activeIndex ? 'active' : ''}`}
                     aria-label={`Go to item ${i + 1}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveIndex(i);
-                    }}
+                    onClick={(e) => handleDotClick(e, i)}
                   />
                 ))}
               </div>
