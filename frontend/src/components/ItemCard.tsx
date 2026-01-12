@@ -321,20 +321,21 @@ export const ItemCard: React.FC<Props> = ({ item, onClick, onDeleted }) => {
                     <span>Open in Telegram</span>
                   </button>
                 )}
+                {displayItem.type !== 'text' && (
+                  <button
+                      className="dropdown-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(`/api/v1/items/${item.id}/raw`, '_blank');
+                        setShowMenu(false);
+                      }}
+                  >
+                    <Download size={18} />
+                    <span>Download Raw</span>
+                  </button>
+                )}
                 <button
                   className="dropdown-item"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    window.open(`/api/v1/items/${item.id}/raw`, '_blank');
-                    setShowMenu(false);
-                  }}
-                >
-                  <Download size={18} />
-                  <span>Download Raw</span>
-                </button>
-                <button
-                  className="dropdown-item delete"
-                  style={{ color: '#ff4d4f' }}
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowConfirm(true);
