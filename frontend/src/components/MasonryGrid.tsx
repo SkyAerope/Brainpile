@@ -184,6 +184,19 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   const fallbackWidth = isDrawerPage ? debouncedWindowWidth - 440 : debouncedWindowWidth - 80;
   const effectiveWidth = Math.max(1, containerPosition.width || fallbackWidth);
   const columnCount = getColumnCount(effectiveWidth);
+
+  // 列数变化时，临时禁用虚拟滚动，全部渲染测量
+  const prevColumnCountRef = useRef(columnCount);
+  const [isMeasuring, setIsMeasuring] = useState(false);
+  useEffect(() => {
+    if (prevColumnCountRef.current !== columnCount) {
+      setIsMeasuring(true);
+      const timer = setTimeout(() => setIsMeasuring(false), 1000);
+      prevColumnCountRef.current = columnCount;
+      return () => clearTimeout(timer);
+    }
+  }, [columnCount]);
+
   const positioner = usePositioner(
     {
       width: effectiveWidth,
@@ -350,7 +363,7 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     // Random 页：允许重复 id，优先使用 clientKey（稳定，不依赖 index）
     itemKey: (data, index) => isRandomPage ? (data.clientKey ?? `${data.id}:${index}`) : data.id,
     render: renderCard,
-    overscanBy: 2,
+    overscanBy: isMeasuring ? safeItems.length : 2,
   });
 
   return (
