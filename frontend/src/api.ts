@@ -1,5 +1,8 @@
 export interface Item {
   id: number;
+  // Client-only stable key for UI lists (e.g. Random page may contain duplicate ids).
+  // Not persisted; may be undefined for most items.
+  clientKey?: string;
   type: string;
   content: string | null;
   s3_url: string | null;

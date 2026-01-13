@@ -320,6 +320,11 @@ body.modal-open .entities-list {
   background-clip: padding-box;
 }
 
+/* 瀑布流 item 动画由 JS FLIP 实现，这里只做性能优化提示 */
+.my-masonry-grid > * {
+  will-change: transform;
+}
+
 /* 备用布局 / 其他网格 */
 .grid {
   display: grid;

@@ -1,8 +1,33 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Item } from '../api';
 import { ItemCard } from './ItemCard';
 import { useContainerPosition, useMasonry, usePositioner, useResizeObserver } from 'masonic';
 import type { RenderComponentProps } from 'masonic';
+
+// FLIP animation (two-phase): 在上一次 layoutEffect cleanup 里记录旧位置，下一次 layoutEffect 里对比并用 transform 动画。
+const ANIMATION_DURATION_MS = 330;
+const ANIMATION_EASING = 'cubic-bezier(0.33, 0.33, 0, 1)';
+
+type LayoutSnapshot = { top: number; left: number; width: number; height: number };
+
+function getMasonicWrapper(el: HTMLElement): HTMLElement | null {
+  // masonic 把 top/left/width 设在外层容器上
+  return el.parentElement as HTMLElement | null;
+}
+
+function isMasonicMeasuring(wrapper: HTMLElement): boolean {
+  const style = wrapper.style;
+  return style.visibility === 'hidden' || style.zIndex === '-1000';
+}
+
+function readSnapshot(wrapper: HTMLElement): LayoutSnapshot {
+  const style = wrapper.style;
+  const top = parseFloat(style.top) || 0;
+  const left = parseFloat(style.left) || 0;
+  const width = parseFloat(style.width) || wrapper.offsetWidth;
+  const height = wrapper.offsetHeight;
+  return { top, left, width, height };
+}
 
 function isValidItem(value: unknown): value is Item {
   return (
@@ -31,6 +56,17 @@ function useWindowWidth() {
     },
     () => typeof window !== 'undefined' ? window.innerWidth : 1200
   );
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(handle);
+  }, [value, delayMs]);
+
+  return debouncedValue;
 }
 
 function getColumnCount(width: number) {
@@ -107,13 +143,22 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   onLoadMore,
 }) => {
   const windowWidth = useWindowWidth();
+  const debouncedWindowWidth = useDebouncedValue(windowWidth, 300);
 
   const containerRef = useRef<HTMLElement | null>(null);
   const { scrollEl, scrollTop, height, isScrolling } = useScrollContainerMetrics('.main-scroll');
+  
+  // 当 layoutKey 变化时清空位置缓存，避免错误的动画
+  const prevLayoutKeyRef = useRef(layoutKey);
+  useEffect(() => {
+    if (prevLayoutKeyRef.current !== layoutKey) {
+      prevLayoutKeyRef.current = layoutKey;
+    }
+  }, [layoutKey]);
 
   // Masonic caches layout by index; if the items array shrinks (e.g. delete/reset/query switch),
   // it may render with stale indices before any effects run. Detect shrink synchronously and
-  // force a remount via `key` to drop internal caches.
+  // invalidate positioner via deps to drop internal caches (without remounting DOM, so animations work).
   const prevLenRef = useRef(items.length);
   const shrinkNonceRef = useRef(0);
   if (items.length < prevLenRef.current) {
@@ -125,9 +170,18 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   const safeItems = useMemo(() => items.filter(isValidItem), [items]);
 
   const isDrawerPage = window.location.pathname.startsWith('/entities') || window.location.pathname.startsWith('/tags');
+  const isRandomPage = window.location.pathname.startsWith('/random');
 
-  const containerPosition = useContainerPosition(containerRef, [windowWidth, isDrawerPage]);
-  const fallbackWidth = isDrawerPage ? windowWidth - 440 : windowWidth - 80;
+  // 记录最近一次“布局变化”（resize 或列宽变化），用于让 resize 后新进入视口的 item 也能动画一次。
+  const layoutChangeTokenRef = useRef(0);
+  const lastLayoutChangeAtRef = useRef(0);
+  useEffect(() => {
+    layoutChangeTokenRef.current += 1;
+    lastLayoutChangeAtRef.current = Date.now();
+  }, [debouncedWindowWidth, isDrawerPage]);
+
+  const containerPosition = useContainerPosition(containerRef, [debouncedWindowWidth, isDrawerPage]);
+  const fallbackWidth = isDrawerPage ? debouncedWindowWidth - 440 : debouncedWindowWidth - 80;
   const effectiveWidth = Math.max(1, containerPosition.width || fallbackWidth);
   const columnCount = getColumnCount(effectiveWidth);
   const positioner = usePositioner(
@@ -159,18 +213,127 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     return () => obs.disconnect();
   }, [loading, hasMore, onLoadMore, scrollEl]);
 
+  // FLIP: itemKey -> inner element
+  const flipRefs = useRef<Map<string | number, HTMLElement>>(new Map());
+  const prevSnapshotsRef = useRef<Map<string | number, LayoutSnapshot>>(new Map());
+  const runningAnimations = useRef<WeakMap<HTMLElement, Animation>>(new WeakMap());
+  const lastAppliedLayoutChangeTokenRef = useRef<number>(0);
+
+  useLayoutEffect(() => {
+    const currentSnapshots = new Map<string | number, LayoutSnapshot>();
+    const now = Date.now();
+
+    flipRefs.current.forEach((innerEl, key) => {
+      if (!innerEl || !innerEl.isConnected) return;
+      const wrapper = getMasonicWrapper(innerEl);
+      if (!wrapper || !wrapper.isConnected) return;
+      if (isMasonicMeasuring(wrapper)) return;
+
+      const current = readSnapshot(wrapper);
+      currentSnapshots.set(key, current);
+
+      const prev = prevSnapshotsRef.current.get(key);
+
+      // 1) 位置/宽度变化：translate + scaleX
+      if (prev) {
+        const deltaX = prev.left - current.left;
+        const deltaY = prev.top - current.top;
+        const scaleX = current.width > 0 ? prev.width / current.width : 1;
+
+        const moved = Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5;
+        const resizedX = Math.abs(scaleX - 1) > 0.005;
+        if (!moved && !resizedX) return;
+
+        const existing = runningAnimations.current.get(wrapper);
+        if (existing) existing.cancel();
+
+        wrapper.style.transformOrigin = '0 0';
+        const animation = wrapper.animate(
+          [
+            { transform: `translate(${deltaX}px, ${deltaY}px) scaleX(${scaleX})` },
+            { transform: 'translate(0px, 0px) scaleX(1)' },
+          ],
+          {
+            duration: ANIMATION_DURATION_MS,
+            easing: ANIMATION_EASING,
+          }
+        );
+
+        runningAnimations.current.set(wrapper, animation);
+        animation.finished
+          .catch(() => undefined)
+          .finally(() => {
+            if (runningAnimations.current.get(wrapper) === animation) {
+              runningAnimations.current.delete(wrapper);
+            }
+            wrapper.style.transformOrigin = '';
+            animation.cancel();
+          });
+        return;
+      }
+
+      // 2) 没有 prev：通常是虚拟化或 resize 后“新进入视口”的元素。
+      //    仅在最近一次 layout change 后短时间内，做一次轻量 enter 动画（不依赖 CSS）。
+      const lastChangeAt = lastLayoutChangeAtRef.current;
+      const isRecentLayoutChange = now - lastChangeAt < 800;
+      const token = layoutChangeTokenRef.current;
+      const shouldEnterAnimate = isRecentLayoutChange && token !== lastAppliedLayoutChangeTokenRef.current;
+      if (shouldEnterAnimate) {
+        const existing = runningAnimations.current.get(wrapper);
+        if (existing) existing.cancel();
+        const animation = wrapper.animate(
+          [
+            { transform: 'translateY(12px)', opacity: 0.001 },
+            { transform: 'translateY(0px)', opacity: 1 },
+          ],
+          {
+            duration: Math.min(220, ANIMATION_DURATION_MS),
+            easing: 'ease-out',
+          }
+        );
+        runningAnimations.current.set(wrapper, animation);
+        animation.finished
+          .catch(() => undefined)
+          .finally(() => {
+            if (runningAnimations.current.get(wrapper) === animation) {
+              runningAnimations.current.delete(wrapper);
+            }
+            animation.cancel();
+          });
+      }
+    });
+
+    lastAppliedLayoutChangeTokenRef.current = layoutChangeTokenRef.current;
+
+    return () => {
+      prevSnapshotsRef.current = currentSnapshots;
+    };
+  });
+  
   const renderCard = useCallback(
     ({ data }: RenderComponentProps<Item>) => {
       if (!data) return null;
+      const key = isRandomPage ? (data.clientKey ?? data.id) : data.id;
       return (
-        <ItemCard
-          item={data}
-          onClick={(item, opts) => onItemClick(item, opts)}
-          onDeleted={onItemDelete}
-        />
+        <div
+          ref={(el) => {
+            if (el) {
+              flipRefs.current.set(key, el);
+            } else {
+              flipRefs.current.delete(key);
+            }
+          }}
+          style={{ width: '100%', height: '100%' }}
+        >
+          <ItemCard
+            item={data}
+            onClick={(item, opts) => onItemClick(item, opts)}
+            onDeleted={onItemDelete}
+          />
+        </div>
       );
     },
-    [onItemClick, onItemDelete]
+    [onItemClick, onItemDelete, isRandomPage]
   );
 
   const masonry = useMasonry<Item>({
@@ -183,15 +346,16 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     height,
     isScrolling,
     itemHeightEstimate: 320,
-    // 使Random页的元素可以重复
-    itemKey: (data, index) => `${data.id}:${index}`,
+    // 非 Random 页：稳定 key，删除时其它元素才能平滑移动而不是 remount
+    // Random 页：允许重复 id，优先使用 clientKey（稳定，不依赖 index）
+    itemKey: (data, index) => isRandomPage ? (data.clientKey ?? `${data.id}:${index}`) : data.id,
     render: renderCard,
     overscanBy: 2,
   });
 
   return (
     <>
-      <React.Fragment key={`${layoutKey ?? 'default'}:${shrinkNonce}`}>{masonry}</React.Fragment>
+      {masonry}
       {(loading || hasMore) && (
         <div ref={loaderRef} style={{ padding: '2rem', textAlign: 'center' }}>
           <button 
