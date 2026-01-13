@@ -5,7 +5,7 @@ import { useContainerPosition, useMasonry, usePositioner, useResizeObserver } fr
 import type { RenderComponentProps } from 'masonic';
 
 // FLIP animation (two-phase): 在上一次 layoutEffect cleanup 里记录旧位置，下一次 layoutEffect 里对比并用 transform 动画。
-const ANIMATION_DURATION_MS = 330;
+const ANIMATION_DURATION_MS = 200;
 const ANIMATION_EASING = 'cubic-bezier(0.33, 0.33, 0, 1)';
 
 type LayoutSnapshot = { top: number; left: number; width: number; height: number };
@@ -191,7 +191,7 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   useEffect(() => {
     if (prevColumnCountRef.current !== columnCount) {
       setIsMeasuring(true);
-      const timer = setTimeout(() => setIsMeasuring(false), 1000);
+      const timer = setTimeout(() => setIsMeasuring(false), 500);
       prevColumnCountRef.current = columnCount;
       return () => clearTimeout(timer);
     }
@@ -217,7 +217,7 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
       if (entries[0].isIntersecting) {
         onLoadMore();
       }
-    }, { root: scrollEl ?? null, rootMargin: '400px' }); 
+    }, { root: scrollEl ?? null, rootMargin: '1200px' }); 
 
     if (loaderRef.current) {
       obs.observe(loaderRef.current);
@@ -234,7 +234,7 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
 
   useLayoutEffect(() => {
     const currentSnapshots = new Map<string | number, LayoutSnapshot>();
-    const now = Date.now();
+    // const now = Date.now();
 
     flipRefs.current.forEach((innerEl, key) => {
       if (!innerEl || !innerEl.isConnected) return;
@@ -247,15 +247,17 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
 
       const prev = prevSnapshotsRef.current.get(key);
 
-      // 1) 位置/宽度变化：translate + scaleX
+      // 1) 位置/宽度/高度变化：translate + scaleX + scaleY
       if (prev) {
         const deltaX = prev.left - current.left;
         const deltaY = prev.top - current.top;
         const scaleX = current.width > 0 ? prev.width / current.width : 1;
+        const scaleY = current.height > 0 ? prev.height / current.height : 1;
 
         const moved = Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5;
         const resizedX = Math.abs(scaleX - 1) > 0.005;
-        if (!moved && !resizedX) return;
+        const resizedY = Math.abs(scaleY - 1) > 0.005;
+        if (!moved && !resizedX && !resizedY) return;
 
         const existing = runningAnimations.current.get(wrapper);
         if (existing) existing.cancel();
@@ -263,8 +265,8 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
         wrapper.style.transformOrigin = '0 0';
         const animation = wrapper.animate(
           [
-            { transform: `translate(${deltaX}px, ${deltaY}px) scaleX(${scaleX})` },
-            { transform: 'translate(0px, 0px) scaleX(1)' },
+            { transform: `translate(${deltaX}px, ${deltaY}px) scaleX(${scaleX}) scaleY(${scaleY})` },
+            { transform: 'translate(0px, 0px) scaleX(1) scaleY(1)' },
           ],
           {
             duration: ANIMATION_DURATION_MS,
@@ -287,33 +289,33 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
 
       // 2) 没有 prev：通常是虚拟化或 resize 后“新进入视口”的元素。
       //    仅在最近一次 layout change 后短时间内，做一次轻量 enter 动画（不依赖 CSS）。
-      const lastChangeAt = lastLayoutChangeAtRef.current;
-      const isRecentLayoutChange = now - lastChangeAt < 800;
-      const token = layoutChangeTokenRef.current;
-      const shouldEnterAnimate = isRecentLayoutChange && token !== lastAppliedLayoutChangeTokenRef.current;
-      if (shouldEnterAnimate) {
-        const existing = runningAnimations.current.get(wrapper);
-        if (existing) existing.cancel();
-        const animation = wrapper.animate(
-          [
-            { transform: 'translateY(12px)', opacity: 0.001 },
-            { transform: 'translateY(0px)', opacity: 1 },
-          ],
-          {
-            duration: Math.min(220, ANIMATION_DURATION_MS),
-            easing: 'ease-out',
-          }
-        );
-        runningAnimations.current.set(wrapper, animation);
-        animation.finished
-          .catch(() => undefined)
-          .finally(() => {
-            if (runningAnimations.current.get(wrapper) === animation) {
-              runningAnimations.current.delete(wrapper);
-            }
-            animation.cancel();
-          });
-      }
+      // const lastChangeAt = lastLayoutChangeAtRef.current;
+      // const isRecentLayoutChange = now - lastChangeAt < 800;
+      // const token = layoutChangeTokenRef.current;
+      // const shouldEnterAnimate = isRecentLayoutChange && token !== lastAppliedLayoutChangeTokenRef.current;
+      // if (shouldEnterAnimate) {
+      //   const existing = runningAnimations.current.get(wrapper);
+      //   if (existing) existing.cancel();
+      //   const animation = wrapper.animate(
+      //     [
+      //       { transform: 'translateY(12px)', opacity: 0.001 },
+      //       { transform: 'translateY(0px)', opacity: 1 },
+      //     ],
+      //     {
+      //       duration: Math.min(220, ANIMATION_DURATION_MS),
+      //       easing: 'ease-out',
+      //     }
+      //   );
+      //   runningAnimations.current.set(wrapper, animation);
+      //   animation.finished
+      //     .catch(() => undefined)
+      //     .finally(() => {
+      //       if (runningAnimations.current.get(wrapper) === animation) {
+      //         runningAnimations.current.delete(wrapper);
+      //       }
+      //       animation.cancel();
+      //     });
+      // }
     });
 
     lastAppliedLayoutChangeTokenRef.current = layoutChangeTokenRef.current;
