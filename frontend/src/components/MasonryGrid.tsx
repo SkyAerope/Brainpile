@@ -4,11 +4,12 @@ import { ItemCard } from './ItemCard';
 import { useContainerPosition, useMasonry, usePositioner, useResizeObserver } from 'masonic';
 import type { RenderComponentProps } from 'masonic';
 
-// FLIP animation (two-phase): 在上一次 layoutEffect cleanup 里记录旧位置，下一次 layoutEffect 里对比并用 transform 动画。
+// FLIP animation: 记录上一次“稳定布局”的快照，resize 时等 positioner 同步高度后再动画。
 const ANIMATION_DURATION_MS = 200;
 const ANIMATION_EASING = 'cubic-bezier(0.33, 0.33, 0, 1)';
 
 type LayoutSnapshot = { top: number; left: number; width: number; height: number };
+type FlipEntry = { el: HTMLElement; index: number };
 
 function getMasonicWrapper(el: HTMLElement): HTMLElement | null {
   // masonic 把 top/left/width 设在外层容器上
@@ -27,6 +28,18 @@ function readSnapshot(wrapper: HTMLElement): LayoutSnapshot {
   const width = parseFloat(style.width) || wrapper.offsetWidth;
   const height = wrapper.offsetHeight;
   return { top, left, width, height };
+}
+
+function readVisualSnapshot(wrapper: HTMLElement): LayoutSnapshot {
+  const rect = wrapper.getBoundingClientRect();
+  const offsetParent = wrapper.offsetParent as HTMLElement | null;
+  const parentRect = offsetParent ? offsetParent.getBoundingClientRect() : { left: 0, top: 0 };
+  return {
+    top: rect.top - parentRect.top,
+    left: rect.left - parentRect.left,
+    width: rect.width,
+    height: rect.height,
+  };
 }
 
 function isValidItem(value: unknown): value is Item {
@@ -184,6 +197,15 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   const fallbackWidth = isDrawerPage ? debouncedWindowWidth - 440 : debouncedWindowWidth - 80;
   const effectiveWidth = Math.max(1, containerPosition.width || fallbackWidth);
   const columnCount = getColumnCount(effectiveWidth);
+  const pendingResizeRef = useRef(false);
+  const lastEffectiveWidthRef = useRef(effectiveWidth);
+
+  useEffect(() => {
+    if (lastEffectiveWidthRef.current !== effectiveWidth) {
+      pendingResizeRef.current = true;
+      lastEffectiveWidthRef.current = effectiveWidth;
+    }
+  }, [effectiveWidth]);
 
   // 列数变化时，临时禁用虚拟滚动，全部渲染测量
   const prevColumnCountRef = useRef(columnCount);
@@ -226,41 +248,70 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     return () => obs.disconnect();
   }, [loading, hasMore, onLoadMore, scrollEl]);
 
-  // FLIP: itemKey -> inner element
-  const flipRefs = useRef<Map<string | number, HTMLElement>>(new Map());
+  // FLIP: itemKey -> inner element + index
+  const flipRefs = useRef<Map<string | number, FlipEntry>>(new Map());
   const prevSnapshotsRef = useRef<Map<string | number, LayoutSnapshot>>(new Map());
   const runningAnimations = useRef<WeakMap<HTMLElement, Animation>>(new WeakMap());
   const lastAppliedLayoutChangeTokenRef = useRef<number>(0);
 
   useLayoutEffect(() => {
     const currentSnapshots = new Map<string | number, LayoutSnapshot>();
+    const entries: Array<{ key: string | number; wrapper: HTMLElement; snapshot: LayoutSnapshot }> = [];
+    let layoutStable = true;
+    let checkedPositioner = false;
     // const now = Date.now();
 
-    flipRefs.current.forEach((innerEl, key) => {
-      if (!innerEl || !innerEl.isConnected) return;
-      const wrapper = getMasonicWrapper(innerEl);
+    flipRefs.current.forEach((entry, key) => {
+      const el = entry.el;
+      const index = entry.index;
+      if (!el || !el.isConnected) return;
+      const wrapper = getMasonicWrapper(el);
       if (!wrapper || !wrapper.isConnected) return;
       if (isMasonicMeasuring(wrapper)) return;
 
       const current = readSnapshot(wrapper);
       currentSnapshots.set(key, current);
+      entries.push({ key, wrapper, snapshot: current });
 
+      if (pendingResizeRef.current) {
+        const position = positioner.get(index);
+        if (position) {
+          checkedPositioner = true;
+          if (Math.abs(position.height - current.height) > 0.5) {
+            layoutStable = false;
+          }
+        }
+      }
+    });
+
+    if (pendingResizeRef.current && checkedPositioner && !layoutStable) {
+      return;
+    }
+
+    entries.forEach(({ key, wrapper, snapshot: current }) => {
       const prev = prevSnapshotsRef.current.get(key);
 
       // 1) 位置/宽度/高度变化：translate + scaleX + scaleY
       if (prev) {
-        const deltaX = prev.left - current.left;
-        const deltaY = prev.top - current.top;
-        const scaleX = current.width > 0 ? prev.width / current.width : 1;
-        const scaleY = current.height > 0 ? prev.height / current.height : 1;
+        const layoutDeltaX = prev.left - current.left;
+        const layoutDeltaY = prev.top - current.top;
+        const layoutScaleX = current.width > 0 ? prev.width / current.width : 1;
+        const layoutScaleY = current.height > 0 ? prev.height / current.height : 1;
 
-        const moved = Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5;
-        const resizedX = Math.abs(scaleX - 1) > 0.005;
-        const resizedY = Math.abs(scaleY - 1) > 0.005;
+        const moved = Math.abs(layoutDeltaX) > 0.5 || Math.abs(layoutDeltaY) > 0.5;
+        const resizedX = Math.abs(layoutScaleX - 1) > 0.005;
+        const resizedY = Math.abs(layoutScaleY - 1) > 0.005;
         if (!moved && !resizedX && !resizedY) return;
 
         const existing = runningAnimations.current.get(wrapper);
+        // If an animation is in-flight, retarget from its current visual state to avoid a snap.
+        const fromSnapshot = existing ? readVisualSnapshot(wrapper) : prev;
         if (existing) existing.cancel();
+
+        const deltaX = fromSnapshot.left - current.left;
+        const deltaY = fromSnapshot.top - current.top;
+        const scaleX = current.width > 0 ? fromSnapshot.width / current.width : 1;
+        const scaleY = current.height > 0 ? fromSnapshot.height / current.height : 1;
 
         wrapper.style.transformOrigin = '0 0';
         const animation = wrapper.animate(
@@ -276,10 +327,11 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
 
         runningAnimations.current.set(wrapper, animation);
         animation.finished
+          // .catch(() => console.log(`Animation cancelled for item ${key} with deltaX=${deltaX}, deltaY=${deltaY}, scaleX=${scaleX}, scaleY=${scaleY}`))
           .catch(() => undefined)
           .finally(() => {
             if (runningAnimations.current.get(wrapper) === animation) {
-              runningAnimations.current.delete(wrapper);
+              runningAnimations.current.delete(wrapper);                              
             }
             wrapper.style.transformOrigin = '';
             animation.cancel();
@@ -319,21 +371,21 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     });
 
     lastAppliedLayoutChangeTokenRef.current = layoutChangeTokenRef.current;
-
-    return () => {
-      prevSnapshotsRef.current = currentSnapshots;
-    };
+    prevSnapshotsRef.current = currentSnapshots;
+    if (pendingResizeRef.current) {
+      pendingResizeRef.current = false;
+    }
   });
   
   const renderCard = useCallback(
-    ({ data }: RenderComponentProps<Item>) => {
+    ({ data, index }: RenderComponentProps<Item>) => {
       if (!data) return null;
       const key = isRandomPage ? (data.clientKey ?? data.id) : data.id;
       return (
         <div
           ref={(el) => {
             if (el) {
-              flipRefs.current.set(key, el);
+              flipRefs.current.set(key, { el, index });
             } else {
               flipRefs.current.delete(key);
             }

@@ -225,7 +225,6 @@ body.modal-open .entities-list {
 .btn.btn-secondary {
   background-color: var(--fourth-accent-color);
   color: var(--text-primary);
-  transition: background-color 0.2s;
 }
 
 .btn.btn-secondary:hover {
