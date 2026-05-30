@@ -77,6 +77,7 @@ async fn main() {
         config,
         http_client: reqwest::Client::new(),
         s3_signing_client: *s3_signing_client,
+        media_marker: brainpile_core::embedding::MediaMarker::new(),
     };
 
     // Spawn TG Bot

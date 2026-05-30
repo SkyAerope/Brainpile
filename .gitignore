@@ -21,3 +21,5 @@ target
 #.idea/
 .env
 docs
+# 本地嵌入模型权重（体积大、CC-BY-NC 许可，不入库）
+models/

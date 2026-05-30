@@ -473,8 +473,7 @@ async fn perform_task(
         }
     }
     
-    let mut visual_embedding_str: Option<String> = None;
-    let mut text_embedding_str: Option<String> = None;
+    let mut embedding_str: Option<String> = None;
     let mut searchable_text = content_text.clone();
 
     // 1. OCR via VLM for images
@@ -528,7 +527,8 @@ async fn perform_task(
         }
     }
 
-    // 2. Visual Embedding (CLIP) for images and video cover frames
+    // 2. 统一嵌入（jina-v5-omni）：图片/视频封面走图片向量，否则走文档文本向量。
+    //    文本/图片共享同一 768 维向量空间，因此只需写入单一 embedding 列。
     let visual_bytes = if item_type == "image" && !file_bytes.is_empty() {
         Some(file_bytes.clone())
     } else if item_type == "video" && !cover_frame_bytes.is_empty() {
@@ -536,55 +536,20 @@ async fn perform_task(
     } else {
         None
     };
-    
-    if let Some(img_bytes) = visual_bytes {
-        let clip_url = format!("{}/embed", state.config.clip_api_url);
-        let part = reqwest::multipart::Part::bytes(img_bytes)
-           .file_name("image.jpg")
-           .mime_str("image/jpeg")?;
-        let form = reqwest::multipart::Form::new().part("file", part);
-        let res = state.http_client.post(&clip_url).multipart(form).send().await?;
-        if res.status().is_success() {
-             let json: serde_json::Value = res.json().await?;
-             if let Some(arr) = json.get("embedding").and_then(|v| v.as_array()) {
-                 let vec: Vec<f32> = arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
-                 visual_embedding_str = Some(format!("[{}]", vec.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",")));
-                 tracing::info!("Generated visual embedding for {}", item_type);
-             }
-        }
-    }
 
-    // 3. Text Embedding (BGE-M3 via OpenAI-compatible API) for searchable text
-    if !searchable_text.is_empty() {
-        let embedding_url = format!("{}/embeddings", state.config.embedding_api_base);
-        let body = serde_json::json!({
-            "model": state.config.embedding_model,
-            "input": searchable_text
-        });
-        let res = state.http_client
-            .post(&embedding_url)
-            .header("Authorization", format!("Bearer {}", state.config.embedding_api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-        
-        if res.status().is_success() {
-            let json: serde_json::Value = res.json().await?;
-            // OpenAI format: {"data": [{"embedding": [...]}]}
-            if let Some(arr) = json.get("data")
-                .and_then(|d| d.get(0))
-                .and_then(|d| d.get("embedding"))
-                .and_then(|e| e.as_array()) 
-            {
-                let vec: Vec<f32> = arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
-                text_embedding_str = Some(format!("[{}]", vec.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",")));
-                tracing::info!("Generated text embedding with {} dimensions", vec.len());
-            }
+    if let Some(img_bytes) = visual_bytes {
+        if let Some(vec) = crate::embedding::embed_image(state, &img_bytes).await {
+            embedding_str = Some(crate::embedding::vec_to_pgvector(&vec));
+            tracing::info!("Generated jina image embedding for {}", item_type);
         } else {
-            let status = res.status();
-            let text = res.text().await.unwrap_or_default();
-            tracing::warn!("Embedding API error: {} - {}", status, text);
+            tracing::warn!("jina image embedding failed for {}", item_type);
+        }
+    } else if !searchable_text.is_empty() {
+        if let Some(vec) = crate::embedding::embed_document_text(state, &searchable_text).await {
+            embedding_str = Some(crate::embedding::vec_to_pgvector(&vec));
+            tracing::info!("Generated jina text embedding ({} dims)", vec.len());
+        } else {
+            tracing::warn!("jina text embedding failed");
         }
     }
     
@@ -607,10 +572,10 @@ async fn perform_task(
         INSERT INTO items (
             item_type, content_hash, s3_key, thumbnail_key, 
             content_text, searchable_text, 
-            text_embedding, visual_embedding, 
+            embedding, 
             meta, tg_chat_id, tg_message_id, tg_user_id, tg_group_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8::vector, $9, $10, $11, $12, $13)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8, $9, $10, $11, $12)
         RETURNING id
         "#
     )
@@ -620,8 +585,7 @@ async fn perform_task(
     .bind(thumbnail_key)
     .bind(&content_text)
     .bind(&searchable_text)
-    .bind(text_embedding_str)
-    .bind(visual_embedding_str)
+    .bind(embedding_str)
     .bind(&meta)
     .bind(source_chat_id)
     .bind(source_message_id)

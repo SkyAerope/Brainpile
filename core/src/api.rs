@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use crate::db::{search_text_vec, search_visual_vec, search_fts, rrf_merge, fetch_items_by_ids};
+use crate::db::{search_embedding, search_fts, rrf_merge, fetch_items_by_ids};
 use s3::{Bucket, creds::Credentials, region::Region};
 use axum::{
     extract::{Path, Query, State},
@@ -662,8 +662,8 @@ struct SearchParams {
 }
 
 /// 混合检索 API
-/// - q: 文本搜索（走 text_embedding + visual_embedding(text) + FTS）
-/// - image_url: 以图搜图（走 visual_embedding KNN）
+/// - q: 文本搜索（走 jina embedding + FTS）
+/// - image_url: 以图搜图（走 jina embedding KNN，与文本同一向量空间）
 async fn search_items(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
@@ -681,23 +681,15 @@ async fn search_items(
     
     // 文本搜索模式
     if let Some(ref query_text) = params.q {
-        // 1. 获取文本向量（BGE-M3）用于 text_embedding 召回
-        if let Some(text_vec) = get_text_embedding(&state, query_text).await {
-            if let Ok(hits) = search_text_vec(&state.db, &text_vec, per_channel).await {
-                tracing::info!("text_vec recall: {} hits", hits.len());
+        // 1. jina 统一向量召回（文本 query 向量 → embedding KNN）
+        if let Some(vec) = crate::embedding::embed_query_text(&state, query_text).await {
+            if let Ok(hits) = search_embedding(&state.db, &vec, per_channel).await {
+                tracing::info!("embedding (text) recall: {} hits", hits.len());
                 channels.push(hits);
             }
         }
         
-        // 2. 获取文本的视觉向量（CLIP text embedding）用于 visual_embedding 召回
-        if let Some(visual_vec) = get_clip_text_embedding(&state, query_text).await {
-            if let Ok(hits) = search_visual_vec(&state.db, &visual_vec, per_channel).await {
-                tracing::info!("visual_vec (text) recall: {} hits", hits.len());
-                channels.push(hits);
-            }
-        }
-        
-        // 3. 全文检索召回
+        // 2. 全文检索召回
         if let Ok(hits) = search_fts(&state.db, query_text, per_channel).await {
             tracing::info!("fts recall: {} hits", hits.len());
             channels.push(hits);
@@ -706,10 +698,10 @@ async fn search_items(
     
     // 以图搜图模式
     if let Some(ref image_url) = params.image_url {
-        // 下载图片并获取 CLIP 视觉向量
-        if let Some(visual_vec) = get_clip_image_embedding_from_url(&state, image_url).await {
-            if let Ok(hits) = search_visual_vec(&state.db, &visual_vec, per_channel).await {
-                tracing::info!("visual_vec (image) recall: {} hits", hits.len());
+        // 下载图片并获取 jina 视觉向量（与文本同一空间）
+        if let Some(vec) = crate::embedding::embed_image_from_url(&state, image_url).await {
+            if let Ok(hits) = search_embedding(&state.db, &vec, per_channel).await {
+                tracing::info!("embedding (image) recall: {} hits", hits.len());
                 channels.push(hits);
             }
         }
@@ -935,83 +927,4 @@ async fn delete_tag(
     }
 
     Ok(Json(json!({ "success": true })))
-}
-
-/// 获取文本的 BGE-M3 向量（用于 text_embedding 召回）
-async fn get_text_embedding(state: &AppState, text: &str) -> Option<Vec<f32>> {
-    let embedding_url = format!("{}/embeddings", state.config.embedding_api_base);
-    let body = serde_json::json!({
-        "model": state.config.embedding_model,
-        "input": text
-    });
-    
-    let res = state.http_client
-        .post(&embedding_url)
-        .header("Authorization", format!("Bearer {}", state.config.embedding_api_key))
-        .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .ok()?;
-    
-    if !res.status().is_success() {
-        return None;
-    }
-    
-    let json: serde_json::Value = res.json().await.ok()?;
-    let arr = json.get("data")?.get(0)?.get("embedding")?.as_array()?;
-    
-    Some(arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
-}
-
-/// 获取文本的 CLIP 视觉向量（用于文本搜图）
-async fn get_clip_text_embedding(state: &AppState, text: &str) -> Option<Vec<f32>> {
-    let clip_url = format!("{}/embed_text", state.config.clip_api_url);
-    
-    let res = state.http_client
-        .post(&clip_url)
-        .query(&[("text", text)])
-        .send()
-        .await
-        .ok()?;
-    
-    if !res.status().is_success() {
-        tracing::warn!("CLIP text embedding failed: {}", res.status());
-        return None;
-    }
-    
-    let json: serde_json::Value = res.json().await.ok()?;
-    let arr = json.get("embedding")?.as_array()?;
-    
-    Some(arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
-}
-
-/// 从 URL 下载图片并获取 CLIP 视觉向量（用于以图搜图）
-async fn get_clip_image_embedding_from_url(state: &AppState, image_url: &str) -> Option<Vec<f32>> {
-    // 下载图片
-    let res = state.http_client.get(image_url).send().await.ok()?;
-    if !res.status().is_success() {
-        tracing::warn!("Failed to download image from {}", image_url);
-        return None;
-    }
-    let image_bytes = res.bytes().await.ok()?;
-    
-    // 调用 CLIP embed
-    let clip_url = format!("{}/embed", state.config.clip_api_url);
-    let part = reqwest::multipart::Part::bytes(image_bytes.to_vec())
-        .file_name("image.jpg")
-        .mime_str("image/jpeg")
-        .ok()?;
-    let form = reqwest::multipart::Form::new().part("file", part);
-    
-    let res = state.http_client.post(&clip_url).multipart(form).send().await.ok()?;
-    if !res.status().is_success() {
-        tracing::warn!("CLIP image embedding failed: {}", res.status());
-        return None;
-    }
-    
-    let json: serde_json::Value = res.json().await.ok()?;
-    let arr = json.get("embedding")?.as_array()?;
-    
-    Some(arr.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
 }

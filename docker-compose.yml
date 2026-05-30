@@ -9,19 +9,16 @@ services:
       - S3_PUBLIC_ENDPOINT=http://127.0.0.1:9000
       - S3_ACCESS_KEY=minioadmin
       - S3_SECRET_KEY=minioadmin
-      - CLIP_API_URL=http://brainpile-clip:8000
+      - EMBEDDING_API_URL=http://brainpile-jina:8000
       - VLM_API_BASE=${VLM_API_BASE}
       - VLM_API_KEY=${VLM_API_KEY}
       - VLM_MODEL=${VLM_MODEL}
-      - EMBEDDING_API_BASE=${EMBEDDING_API_BASE}
-      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
       - TG_BOT_TOKEN=${TG_BOT_TOKEN}
       - RUST_LOG=info
     depends_on:
       - postgres
       - minio
-      - brainpile-clip
+      - brainpile-jina
     restart: unless-stopped
 
   brainpile-frontend:
@@ -32,10 +29,13 @@ services:
       - brainpile-core
     restart: unless-stopped
 
-  brainpile-clip:
-    build: ./clip
+  brainpile-jina:
+    build: ./jina
     ports:
       - "8000:8000"
+    volumes:
+      # 默认挂载项目内 models/ 目录；缺文件时 entrypoint 会自动下载到此处
+      - ./models:/models
     restart: unless-stopped
 
   postgres:

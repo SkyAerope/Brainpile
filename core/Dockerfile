@@ -1,8 +1,6 @@
 FROM rust:1.92 AS builder
 WORKDIR /app
 COPY . .
-# Create a dummy main.rs to cache dependencies if we were optimizing, 
-# but for now just copy everything.
 RUN cargo build --release
 
 FROM debian:bookworm-slim

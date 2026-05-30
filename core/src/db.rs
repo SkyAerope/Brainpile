@@ -15,9 +15,10 @@ pub struct SearchHit {
     pub rank: usize,  // 在该路召回中的排名（从 1 开始）
 }
 
-/// 文本向量召回（text_embedding KNN）
-/// 返回 (id, rank) 列表，按相似度降序
-pub async fn search_text_vec(
+/// 统一向量召回（embedding KNN）
+/// jina-v5-omni 把文本/图片映射到同一 768 维空间，查询向量无论来自文本还是
+/// 图片，都走这一路检索。返回 (id, rank) 列表，按相似度降序。
+pub async fn search_embedding(
     pool: &PgPool,
     query_embedding: &[f32],
     limit: i64,
@@ -31,44 +32,8 @@ pub async fn search_text_vec(
         r#"
         SELECT id
         FROM items
-        WHERE text_embedding IS NOT NULL
-        ORDER BY text_embedding <=> $1::vector
-        LIMIT $2
-        "#
-    )
-    .bind(&embedding_str)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
-    
-    Ok(rows
-        .iter()
-        .enumerate()
-        .map(|(i, row)| SearchHit {
-            id: sqlx::Row::get(row, "id"),
-            rank: i + 1,
-        })
-        .collect())
-}
-
-/// 视觉向量召回（visual_embedding KNN）
-/// 返回 (id, rank) 列表，按相似度降序
-pub async fn search_visual_vec(
-    pool: &PgPool,
-    query_embedding: &[f32],
-    limit: i64,
-) -> Result<Vec<SearchHit>, sqlx::Error> {
-    let embedding_str = format!(
-        "[{}]",
-        query_embedding.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",")
-    );
-    
-    let rows = sqlx::query(
-        r#"
-        SELECT id
-        FROM items
-        WHERE visual_embedding IS NOT NULL
-        ORDER BY visual_embedding <=> $1::vector
+        WHERE embedding IS NOT NULL
+        ORDER BY embedding <=> $1::vector
         LIMIT $2
         "#
     )

@@ -3,6 +3,30 @@
 > [!WARNING]
 > 该项目还在积极开发中，目前以增加新功能为重心。部署指南稍后推出。
 
+## 嵌入模型（jina-embeddings-v5-omni）
+
+语义检索使用 [jina-embeddings-v5-omni-nano-retrieval](https://huggingface.co/Yirasumi/jina-embeddings-v5-omni-nano-retrieval-GGUF)（GGUF 量化版），通过 `brainpile-jina` 服务以 jina fork 的 llama.cpp（`feat-v5-omni` 分支）运行。文本与图片被映射到**同一个 768 维向量空间**，因此文搜图、以图搜图都走同一路向量召回。
+
+> [!NOTE]
+> 该模型许可为 **CC-BY-NC-4.0（非商业用途）**，请注意合规。
+
+### 模型为什么不打包进镜像
+
+`brainpile-jina` 镜像**只包含编译好的 `llama-server` 二进制**，不含模型权重。模型（约 480 MB）默认存放在项目根目录的 `models/` 目录（通过绑定挂载映射到容器 `/models`），该目录已加入 `.gitignore` 不会入库。若目录中缺少模型文件，容器**首次启动时会自动从 HuggingFace 下载**并持久化到本地，之后命中缓存直接复用。这样做的好处：
+
+- 镜像保持精简，代码改动重建不必携带大体积权重层；
+- 规避把非商用权重直接打包进镜像分发带来的许可风险；
+- 更换量化版本或更新模型无需重建镜像。
+
+涉及的文件（由 [jina/entrypoint.sh](jina/entrypoint.sh) 下载，放在 `models/` 下）：
+
+| 文件 | 用途 |
+| --- | --- |
+| `jina-embeddings-v5-omni-nano-retrieval-Q4_K_M.gguf` | 主模型权重（token_embd 保留 F16） |
+| `mmproj-jina-embeddings-v5-omni-nano-retrieval-F16.gguf` | 视觉投影层（图片/视频嵌入必需） |
+
+如已有本地 GGUF，可直接以上述文件名放进 `models/` 目录，启动时会跳过下载。
+
 ## 特性
 - 你会发现代码注释是中文的，网页却是英文的
 - 在Telegram中，无论一组图中有几张图，用户只能对它点一个reaction，且bot看来这个reaction是点到第一张图上的；bot可以给组图内多个item点reaction，但用户只能看到一个reaction。所以：

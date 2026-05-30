@@ -4,3 +4,4 @@ pub mod state;
 pub mod bot;
 pub mod worker;
 pub mod api;
+pub mod embedding;
