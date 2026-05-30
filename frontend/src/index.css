@@ -217,12 +217,28 @@ body.modal-open .entities-list {
   gap: 12px;
 }
 
-/* 折叠态：搜索框收成与图标同大的圆球，只露搜索图标，输入框隐藏。
-   左侧 padding 与展开态一致，使搜索图标位置全程固定。 */
+/* 折叠态：搜索框收成与右侧图标按钮一致的 40×40 正圆，背景透明，
+   只露居中的搜索图标，输入框隐藏。 */
 .search-collapsed .search-container {
-  flex: 0 0 48px;
-  width: 48px;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: transparent;
   border-radius: 50%;
+  justify-content: center;
+}
+
+.search-collapsed .search-container:hover {
+  background: var(--card-bg);
+}
+
+.search-collapsed .search-container:focus-within {
+  box-shadow: none;
+}
+
+.search-collapsed .search-icon {
+  margin-right: 0;
 }
 
 .search-collapsed .search-input {
