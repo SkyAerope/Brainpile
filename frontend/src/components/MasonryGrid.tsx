@@ -195,8 +195,24 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   }, [debouncedWindowWidth, isDrawerPage]);
 
   const containerPosition = useContainerPosition(containerRef, [debouncedWindowWidth, isDrawerPage]);
-  const fallbackWidth = isDrawerPage ? debouncedWindowWidth - 440 : debouncedWindowWidth - 80;
-  const effectiveWidth = Math.max(1, containerPosition.width || fallbackWidth);
+
+  // 直接测量容器内容区宽度（content-box，自动排除 .container 的左右 padding）。
+  // 避免 useContainerPosition 首次返回 0 时回退到不含 padding 修正的窗口估算，
+  // 导致 cell 宽度比真实可用宽度大、内容区横向溢出（需 resize 才恢复）。
+  const [measuredWidth, setMeasuredWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setMeasuredWidth(el.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // 回退估算同样扣除 .container 的左右 padding（24 * 2），仅用于测量就绪前的首帧。
+  const fallbackWidth = (isDrawerPage ? debouncedWindowWidth - 440 : debouncedWindowWidth - 80) - 48;
+  const effectiveWidth = Math.max(1, measuredWidth || containerPosition.width || fallbackWidth);
   const columnCount = getColumnCount(effectiveWidth);
   const pendingResizeRef = useRef(false);
   const lastEffectiveWidthRef = useRef(effectiveWidth);
