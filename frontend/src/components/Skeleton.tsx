@@ -50,12 +50,12 @@ interface SkeletonListProps {
   count?: number;
 }
 
-export const SkeletonList: React.FC<SkeletonListProps> = ({ count = 8 }) => (
-  <>
+export const SkeletonList: React.FC<SkeletonListProps> = ({ count = 12 }) => (
+  <div className="skeleton-list">
     {Array.from({ length: count }).map((_, i) => (
       <SkeletonListRow key={i} />
     ))}
-  </>
+  </div>
 );
 
 // ItemModal 详情骨架

@@ -66,6 +66,12 @@
 }
 
 /* 侧栏列表行骨架，匹配 .entity-item 结构 */
+.skeleton-list {
+  /* 填满侧栏并裁剪，避免固定行数撑出滚动条（真实列表用虚拟滚动） */
+  height: 100%;
+  overflow: hidden;
+}
+
 .skeleton-list-row {
   display: flex;
   align-items: center;
@@ -97,7 +103,9 @@
 .skeleton-modal {
   display: flex;
   width: 100%;
-  height: 100%;
+  /* modal-content 无固定高度，给骨架一个稳定高度避免塌缩；
+     不超过 .modal-content 的 max-height: 90vh，因此不会产生滚动条 */
+  height: 70vh;
 }
 
 .skeleton-modal-media {

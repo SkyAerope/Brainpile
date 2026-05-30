@@ -423,6 +423,8 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
 
   // 首屏加载（尚无任何内容）展示骨架网格；翻页时仍由底部按钮承载。
   const showInitialSkeleton = loading && safeItems.length === 0;
+  // Random 页翻页（已有内容）：底部以骨架占位代替按钮，契合无限随机流。
+  const showLoadMoreSkeleton = isRandomPage && loading && safeItems.length > 0;
 
   return (
     <>
@@ -431,21 +433,27 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
       ) : (
         <>
           {masonry}
-          {(loading || hasMore) && (
-            <div ref={loaderRef} style={{ padding: '2rem', textAlign: 'center' }}>
-              <button
-                className="view-btn"
-                onClick={onLoadMore}
-                disabled={loading}
-                style={{
-                  alignSelf: 'center',
-                  opacity: loading ? 0.7 : 1,
-                  cursor: loading ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {loading ? 'Loading...' : 'Load More'}
-              </button>
+          {showLoadMoreSkeleton ? (
+            <div style={{ paddingTop: '1rem' }}>
+              <SkeletonGrid count={6} />
             </div>
+          ) : (
+            (loading || hasMore) && (
+              <div ref={loaderRef} style={{ padding: '2rem', textAlign: 'center' }}>
+                <button
+                  className="view-btn"
+                  onClick={onLoadMore}
+                  disabled={loading}
+                  style={{
+                    alignSelf: 'center',
+                    opacity: loading ? 0.7 : 1,
+                    cursor: loading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loading ? 'Loading...' : 'Load More'}
+                </button>
+              </div>
+            )
           )}
         </>
       )}
