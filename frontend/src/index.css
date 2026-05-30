@@ -178,7 +178,7 @@ body.modal-open .entities-list {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  width: auto;
   height: 40px;
   padding: 0;
   border: none;

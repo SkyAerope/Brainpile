@@ -93,7 +93,7 @@ export const Header: React.FC<HeaderProps> = ({ searchInput, setSearchInput, onS
           onClick={handleSearchClick}
           tabIndex={collapsed ? 0 : -1}
         >
-          <Search className="search-icon" size={20} />
+          <Search className="search-icon" size={24} />
         </button>
         <input
           ref={inputRef}
