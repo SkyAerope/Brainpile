@@ -155,6 +155,7 @@ body.modal-open .entities-list {
 
 .search-container {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   background: #efefef;
@@ -194,6 +195,21 @@ body.modal-open .entities-list {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 抽屉页 header 空间有限：搜索默认为图标按钮，点击展开为输入框 */
+.header-collapsible .search-toggle {
+  margin-right: auto; /* 图标靠左，user-menu 靠右 */
+}
+
+/* 展开时输入框占主导，挤压其余元素；user-menu 收缩让位 */
+.header.search-expanded .search-container {
+  flex: 1 1 auto;
+}
+
+.header.search-expanded .user-menu {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* 按钮 */

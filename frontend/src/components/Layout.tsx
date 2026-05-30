@@ -38,6 +38,7 @@ export const Layout: React.FC = () => {
           setSearchInput={setSearchInput} 
           onSearch={handleSearch} 
           clearSearch={clearSearch} 
+          collapsible={hasDrawerPage}
         />
         <div className="main-scroll">
           <Outlet />
