@@ -37,6 +37,9 @@
 .skeleton-grid {
   column-gap: 16px;
   padding-top: 4px;
+  /* 骨架仅为占位，限制在可视区内，避免加载阶段出现/抖动滚动条 */
+  max-height: calc(100vh - 140px);
+  overflow: hidden;
 }
 
 .skeleton-grid > .skeleton-card {
