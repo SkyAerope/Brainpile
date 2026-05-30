@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use teloxide::prelude::*;
-use teloxide::types::{ChatId, CustomEmojiId, MessageReactionUpdated, ReactionType};
+use teloxide::types::{ChatId, CustomEmojiId, MessageEntityKind, MessageReactionUpdated, ReactionType};
 use teloxide::net::Download;
 use sqlx::Row;
 use s3::Bucket;
@@ -8,12 +8,29 @@ use s3::creds::Credentials;
 use s3::region::Region;
 use std::collections::HashSet;
 use std::io::Read;
+use std::sync::Arc;
 use flate2::read::GzDecoder;
+
+/// Information about this bot used to decide whether a message is one of *our* commands.
+#[derive(Clone, Debug, Default)]
+pub struct BotInfo {
+    /// The bot's username (without the leading `@`), lowercased.
+    pub username: String,
+    /// Commands registered for this bot via `setMyCommands`, without the leading `/`, lowercased.
+    pub commands: HashSet<String>,
+}
 
 pub async fn run_bot(state: AppState) {
     tracing::info!("Starting Telegram Bot...");
     let bot = Bot::new(&state.config.tg_bot_token);
-    
+
+    let bot_info = Arc::new(load_bot_info(&bot).await);
+    tracing::info!(
+        "Bot @{} loaded with {} registered command(s)",
+        bot_info.username,
+        bot_info.commands.len()
+    );
+
     let handler = dptree::entry()
         .branch(
             Update::filter_message().branch(
@@ -26,11 +43,36 @@ pub async fn run_bot(state: AppState) {
         .branch(Update::filter_message_reaction_updated().endpoint(process_message_reaction));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![state])
+        .dependencies(dptree::deps![state, bot_info])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
         .await;
+}
+
+/// Fetches the bot's username and its registered commands so we only intercept
+/// commands that actually belong to this bot.
+async fn load_bot_info(bot: &Bot) -> BotInfo {
+    let username = match bot.get_me().await {
+        Ok(me) => me.username().to_ascii_lowercase(),
+        Err(e) => {
+            tracing::warn!("Failed to fetch bot identity (get_me): {}", e);
+            String::new()
+        }
+    };
+
+    let commands = match bot.get_my_commands().await {
+        Ok(cmds) => cmds
+            .into_iter()
+            .map(|c| c.command.trim_start_matches('/').to_ascii_lowercase())
+            .collect(),
+        Err(e) => {
+            tracing::warn!("Failed to fetch registered commands (get_my_commands): {}", e);
+            HashSet::new()
+        }
+    };
+
+    BotInfo { username, commands }
 }
 
 fn reaction_key(reaction: &ReactionType) -> Option<(String, String)> {
@@ -479,7 +521,51 @@ async fn update_entity_avatar(bot: Bot, state: AppState, id: i64, name: String) 
     }
 }
 
-async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseResult<()> {
+/// Returns true only when the message is a command that *this* bot has registered.
+///
+/// A Telegram command looks like `/cmd` or `/cmd@botusername`. We intercept it only if:
+/// - it is anchored at offset 0 as a `BotCommand` entity, and
+/// - the command name is one of our registered commands, and
+/// - any `@mention` suffix targets this bot (so `/start@otherbot` is left as content).
+fn is_bot_command(msg: &Message, bot_info: &BotInfo) -> bool {
+    let Some(text) = msg.text() else { return false };
+
+    let is_command_entity = msg
+        .entities()
+        .map(|entities| {
+            entities
+                .iter()
+                .any(|e| e.offset == 0 && matches!(e.kind, MessageEntityKind::BotCommand))
+        })
+        .unwrap_or(false);
+    if !is_command_entity {
+        return false;
+    }
+
+    // First whitespace-delimited token, e.g. "/start" or "/start@MyBot".
+    let token = text.split_whitespace().next().unwrap_or("");
+    let token = token.trim_start_matches('/');
+    let (name, mention) = match token.split_once('@') {
+        Some((name, mention)) => (name, Some(mention)),
+        None => (token, None),
+    };
+
+    // If addressed to a specific bot, it must be us.
+    if let Some(mention) = mention {
+        if !bot_info.username.is_empty() && !mention.eq_ignore_ascii_case(&bot_info.username) {
+            return false;
+        }
+    }
+
+    bot_info.commands.contains(&name.to_ascii_lowercase())
+}
+
+async fn process_message(
+    bot: Bot,
+    msg: Message,
+    state: AppState,
+    bot_info: Arc<BotInfo>,
+) -> ResponseResult<()> {
     tracing::info!("Received message: {} from chat {}", msg.id, msg.chat.id);
     
     // 如果是转发消息，尝试获取并更新来源实体的头像
@@ -512,6 +598,12 @@ async fn process_message(bot: Bot, msg: Message, state: AppState) -> ResponseRes
     } else if let Some(video) = msg.video() {
          (Some(video.file.id.clone()), "video", msg.caption().map(|s| s.to_string()).unwrap_or_default())
     } else if let Some(text) = msg.text() {
+         // Skip commands registered for this bot (e.g. /start, /help); other slash-prefixed
+         // text (unknown commands, other bots' commands) is treated as normal content.
+         if is_bot_command(&msg, &bot_info) {
+             tracing::info!("Ignoring bot command message: {}", text);
+             return Ok(());
+         }
          (None, "text", text.to_string())
     } else {
         return Ok(());

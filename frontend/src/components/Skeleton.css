@@ -50,11 +50,9 @@
   gap: 16px;
 }
 
-/* 首屏：填满 header 下方到视口底部并裁剪，既不溢出也不留底部边距。
-   80px 为 sticky header 高度，-24px 抵消 .container 的 padding-bottom。 */
+/* 首屏：高度由组件运行时测量到滚动容器底部（见 useFillHeight），
+   精确填满且不溢出，超出部分裁剪。 */
 .skeleton-grid-fill {
-  height: calc(100vh - 80px);
-  margin-bottom: -24px;
   overflow: hidden;
 }
 
