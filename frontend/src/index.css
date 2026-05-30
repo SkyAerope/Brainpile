@@ -382,6 +382,20 @@ body.modal-open .entities-list {
   padding: 0;
 }
 
+.entities-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+
+.entities-empty-text {
+  font-size: 14px;
+}
+
 .entity-item {
   display: flex;
   align-items: center;

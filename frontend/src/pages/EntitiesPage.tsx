@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { List, type RowComponentProps } from 'react-window';
+import { Boxes } from 'lucide-react';
 import { fetchEntitiesPage, fetchItems, Item, Entity } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
 import { groupItemsForGrid } from '../groupItems';
 import { mergeUniqueItemsById, uniqueItemsById } from '../itemList';
+import { SkeletonList } from '../components/Skeleton';
 
 function formatEntityUpdatedAt(updatedAt?: string | null): string {
     if (!updatedAt) return '';
@@ -255,7 +257,7 @@ export const EntitiesPage: React.FC = () => {
                     </h2>
                 </div>
                 <div className="entities-list" ref={entitiesListRef}>
-                    {entitiesListHeight > 0 && entitiesListWidth > 0 && (
+                    {entities.length > 0 && entitiesListHeight > 0 && entitiesListWidth > 0 && (
                         <List<EntitiesRowProps>
                             defaultHeight={entitiesListHeight}
                             rowCount={entities.length}
@@ -271,6 +273,13 @@ export const EntitiesPage: React.FC = () => {
                             rowProps={entitiesRowProps}
                             style={{ height: entitiesListHeight, width: entitiesListWidth }}
                         />
+                    )}
+                    {entitiesLoading && entities.length === 0 && <SkeletonList count={8} />}
+                    {!entitiesLoading && entities.length === 0 && (
+                        <div className="entities-empty">
+                            <Boxes size={40} strokeWidth={1.5} />
+                            <div className="entities-empty-text">No entities yet</div>
+                        </div>
                     )}
                 </div>
             </div>

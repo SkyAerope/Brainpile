@@ -4,6 +4,7 @@ import './ItemModal.css';
 import { Calendar, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Image as ImageIcon, Trash2, X } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { TagIcon } from './TagIcon';
+import { SkeletonModalDetail } from './Skeleton';
 
 interface Props {
   itemId: number;
@@ -130,7 +131,13 @@ export const ItemModal: React.FC<Props> = ({ itemId, groupItems, startIndex, onC
     switchTo(targetIndex);
   };
 
-  if (loading && detailsCache.size === 0) return <div className="modal-overlay"><div className="modal-loading">Loading...</div></div>;
+  if (loading && detailsCache.size === 0) return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <SkeletonModalDetail />
+      </div>
+    </div>
+  );
   if (!detail) return null;
 
   const effectiveContent = albumCaption ?? detail.content;

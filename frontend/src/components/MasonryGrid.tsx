@@ -3,6 +3,7 @@ import { Item } from '../api';
 import { ItemCard } from './ItemCard';
 import { useContainerPosition, useMasonry, usePositioner, useResizeObserver } from 'masonic';
 import type { RenderComponentProps } from 'masonic';
+import { SkeletonGrid } from './Skeleton';
 
 // FLIP animation: 记录上一次“稳定布局”的快照，resize 时等 positioner 同步高度后再动画。
 const ANIMATION_DURATION_MS = 200;
@@ -420,24 +421,33 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     overscanBy: isMeasuring ? safeItems.length : 2,
   });
 
+  // 首屏加载（尚无任何内容）展示骨架网格；翻页时仍由底部按钮承载。
+  const showInitialSkeleton = loading && safeItems.length === 0;
+
   return (
     <>
-      {masonry}
-      {(loading || hasMore) && (
-        <div ref={loaderRef} style={{ padding: '2rem', textAlign: 'center' }}>
-          <button 
-            className="view-btn" 
-            onClick={onLoadMore} 
-            disabled={loading}
-            style={{ 
-              alignSelf: 'center',
-              opacity: loading ? 0.7 : 1,
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {loading ? 'Loading...' : 'Load More'}
-          </button>
-        </div>
+      {showInitialSkeleton ? (
+        <SkeletonGrid />
+      ) : (
+        <>
+          {masonry}
+          {(loading || hasMore) && (
+            <div ref={loaderRef} style={{ padding: '2rem', textAlign: 'center' }}>
+              <button
+                className="view-btn"
+                onClick={onLoadMore}
+                disabled={loading}
+                style={{
+                  alignSelf: 'center',
+                  opacity: loading ? 0.7 : 1,
+                  cursor: loading ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {loading ? 'Loading...' : 'Load More'}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </>
   );

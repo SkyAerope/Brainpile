@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { List, type RowComponentProps } from 'react-window';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Boxes, Pencil, Trash2 } from 'lucide-react';
 import { deleteTag, fetchItems, fetchTags, type Item, type Tag, updateTagLabel } from '../api';
 import { MasonryGrid } from '../components/MasonryGrid';
 import { ItemModal } from '../components/ItemModal';
@@ -8,6 +8,7 @@ import { TagIcon } from '../components/TagIcon';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { groupItemsForGrid } from '../groupItems';
 import { mergeUniqueItemsById, uniqueItemsById } from '../itemList';
+import { SkeletonList } from '../components/Skeleton';
 
 function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
@@ -351,7 +352,7 @@ export const TagsPage: React.FC = () => {
         </div>
 
         <div className="entities-list" ref={tagsListRef}>
-          {tagsListHeight > 0 && tagsListWidth > 0 && (
+          {tags.length > 0 && tagsListHeight > 0 && tagsListWidth > 0 && (
             <List<TagRowProps>
               defaultHeight={tagsListHeight}
               rowCount={tags.length}
@@ -362,8 +363,12 @@ export const TagsPage: React.FC = () => {
               style={{ height: tagsListHeight, width: tagsListWidth }}
             />
           )}
+          {tagsLoading && tags.length === 0 && <SkeletonList count={8} />}
           {!tagsLoading && tags.length === 0 && (
-            <div style={{ padding: 20, color: 'var(--text-secondary)' }}>No tags yet</div>
+            <div className="entities-empty">
+              <Boxes size={40} strokeWidth={1.5} />
+              <div className="entities-empty-text">No tags yet</div>
+            </div>
           )}
         </div>
       </div>
