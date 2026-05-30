@@ -437,10 +437,10 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
     overscanBy: isMeasuring ? safeItems.length : 2,
   });
 
-  // 首屏加载（尚无任何内容）展示骨架网格；翻页时仍由底部按钮承载。
+  // 首屏加载（尚无任何内容）展示骨架网格。
   const showInitialSkeleton = loading && safeItems.length === 0;
-  // Random 页翻页（已有内容）：底部以骨架占位代替按钮，契合无限随机流。
-  const showLoadMoreSkeleton = isRandomPage && loading && safeItems.length > 0;
+  // 任意页翻页（已有内容）：底部以 inline 骨架占位，配合 IntersectionObserver 实现无限滚动。
+  const showLoadMoreSkeleton = loading && safeItems.length > 0;
 
   return (
     <>
@@ -449,28 +449,12 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
       ) : (
         <>
           {masonry}
-          {showLoadMoreSkeleton ? (
+          {showLoadMoreSkeleton && (
             <div style={{ paddingTop: '1rem' }}>
               <SkeletonGrid count={6} columnCount={columnCount} variant="inline" />
             </div>
-          ) : (
-            (loading || hasMore) && (
-              <div ref={loaderRef} style={{ padding: '2rem', textAlign: 'center' }}>
-                <button
-                  className="view-btn"
-                  onClick={onLoadMore}
-                  disabled={loading}
-                  style={{
-                    alignSelf: 'center',
-                    opacity: loading ? 0.7 : 1,
-                    cursor: loading ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  {loading ? 'Loading...' : 'Load More'}
-                </button>
-              </div>
-            )
           )}
+          {hasMore && <div ref={loaderRef} style={{ height: 1 }} />}
         </>
       )}
     </>
