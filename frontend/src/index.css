@@ -160,8 +160,8 @@ body.modal-open .entities-list {
   align-items: center;
   background: #efefef;
   border-radius: 24px;
-  padding: 0 16px;
-  transition: background 0.2s;
+  padding: 0 12px;
+  transition: background 0.2s, width 0.28s cubic-bezier(0.33, 0.33, 0, 1), flex-basis 0.28s cubic-bezier(0.33, 0.33, 0, 1), padding 0.28s cubic-bezier(0.33, 0.33, 0, 1);
 }
 
 .search-container:hover {
@@ -172,6 +172,24 @@ body.modal-open .entities-list {
   box-shadow: 0 0 0 4px rgba(125, 154, 136, 0.2);
 }
 
+/* 搜索图标按钮：固定在搜索框左侧。完整态不可点（仅装饰）。 */
+.search-icon-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: default;
+}
+
+.search-collapsed .search-icon-btn {
+  cursor: pointer;
+}
+
 .search-icon {
   color: var(--text-secondary);
   margin-right: 8px;
@@ -179,12 +197,14 @@ body.modal-open .entities-list {
 
 .search-input {
   flex: 1;
+  min-width: 0;
   border: none;
   background: transparent;
   padding: 12px 0;
   font-size: 16px;
   outline: none;
   color: var(--text-primary);
+  transition: opacity 0.18s ease;
 }
 
 .search-input::placeholder {
@@ -197,19 +217,29 @@ body.modal-open .entities-list {
   gap: 12px;
 }
 
-/* 抽屉页 header 空间有限：搜索默认为图标按钮，点击展开为输入框 */
-.header-collapsible .search-toggle {
-  margin-right: auto; /* 图标靠左，user-menu 靠右 */
+/* 折叠态：搜索框收成与图标同大的圆球，只露搜索图标，输入框隐藏。
+   左侧 padding 与展开态一致，使搜索图标位置全程固定。 */
+.search-collapsed .search-container {
+  flex: 0 0 48px;
+  width: 48px;
+  border-radius: 50%;
 }
 
-/* 展开时输入框占主导，挤压其余元素；user-menu 收缩让位 */
-.header.search-expanded .search-container {
+.search-collapsed .search-input {
+  opacity: 0;
+  width: 0;
+  flex: 0 0 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+/* 展开态：搜索框从圆球向右展开占满，隐藏右侧三个图标 */
+.search-open .search-container {
   flex: 1 1 auto;
 }
 
-.header.search-expanded .user-menu {
-  flex: 0 1 auto;
-  min-width: 0;
+.search-open .user-menu {
+  display: none;
 }
 
 /* 按钮 */
