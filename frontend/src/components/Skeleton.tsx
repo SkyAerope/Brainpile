@@ -17,19 +17,34 @@ const SkeletonCard: React.FC<{ height: number }> = ({ height }) => (
 
 interface SkeletonGridProps {
   count?: number;
+  columnCount?: number;
+  /** fill: 首屏填满到视口底部；inline: 翻页追加，自然高度。 */
+  variant?: 'fill' | 'inline';
 }
 
-// 内容区瀑布流骨架，Timeline / Random / Entities / Tags 内容区共用
-export const SkeletonGrid: React.FC<SkeletonGridProps> = ({ count = 12 }) => {
-  const heights = useMemo(
-    () => Array.from({ length: count }, () => 160 + Math.round(Math.random() * 200)),
-    [count]
-  );
+// 内容区瀑布流骨架，Timeline / Random / Entities / Tags 内容区共用。
+// 用 flex 多列布局（而非 CSS columns）以保证列数稳定、纵向堆叠，
+// 避免固定高度下 CSS columns 横向溢出成多列。
+export const SkeletonGrid: React.FC<SkeletonGridProps> = ({ count = 12, columnCount = 2, variant = 'fill' }) => {
+  const cols = Math.max(1, columnCount);
+
+  const columns = useMemo(() => {
+    const buckets: number[][] = Array.from({ length: cols }, () => []);
+    for (let i = 0; i < count; i++) {
+      const h = 160 + Math.round(Math.random() * 200);
+      buckets[i % cols].push(h);
+    }
+    return buckets;
+  }, [count, cols]);
 
   return (
-    <div className="skeleton-grid">
-      {heights.map((h, i) => (
-        <SkeletonCard key={i} height={h} />
+    <div className={`skeleton-grid skeleton-grid-${variant}`}>
+      {columns.map((heights, c) => (
+        <div className="skeleton-grid-col" key={c}>
+          {heights.map((h, i) => (
+            <SkeletonCard key={i} height={h} />
+          ))}
+        </div>
       ))}
     </div>
   );

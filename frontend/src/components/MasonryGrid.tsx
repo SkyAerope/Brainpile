@@ -429,13 +429,13 @@ export const MasonryGrid: React.FC<MasonryGridProps> = ({
   return (
     <>
       {showInitialSkeleton ? (
-        <SkeletonGrid />
+        <SkeletonGrid columnCount={columnCount} />
       ) : (
         <>
           {masonry}
           {showLoadMoreSkeleton ? (
             <div style={{ paddingTop: '1rem' }}>
-              <SkeletonGrid count={6} />
+              <SkeletonGrid count={6} columnCount={columnCount} variant="inline" />
             </div>
           ) : (
             (loading || hasMore) && (
