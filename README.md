@@ -1,18 +1,73 @@
 # Brainpile
 
 > [!WARNING]
-> 该项目还在积极开发中，目前以增加新功能为重心。部署指南稍后推出。
+> 该项目还在积极开发中，目前以增加新功能为重心。
+
+## 如何使用
+
+### 配置
+
+处理视频需要安装 `ffmpeg`。
+
+复制并编辑 `.env` ：
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`，填入 VLM 和 Telegram Bot 配置。
+
+### Docker Compose 部署
+
+若不需要某项服务（例如 S3 改为外接），可在 `docker-compose.yml` 中删除对应服务。
+
+配置好 `.env` 后，构建并启动全部服务：
+
+```bash
+docker compose up -d --build
+```
+
+若从其他设备访问，需要把 `docker-compose.yml` 中后端的 `S3_PUBLIC_ENDPOINT` 改成浏览器可访问的地址。
+
+### 开发
+
+1. 启动数据库、对象存储和嵌入服务：
+
+   ```bash
+   docker compose up -d --build postgres seaweedfs brainpile-jina
+   docker compose logs -f postgres seaweedfs brainpile-jina # 查看日志
+   ```
+
+   等待服务就绪；嵌入服务首次启动会下载模型，可能需要较长时间。按 `Ctrl+C` 退出日志查看不会停止容器。如果此前已启动完整服务，先执行 `docker compose stop brainpile-core brainpile-frontend`，再运行本地前后端。
+
+2. 启动后端：
+
+   ```bash
+   cargo run -p brainpile-core
+   ```
+
+   后端监听 `http://localhost:8080`，同时运行 Telegram Bot 和后台任务。修改后端代码后需重启后端。
+
+3. 启动前端：
+
+   ```bash
+   cd frontend
+   pnpm install --frozen-lockfile
+   pnpm dev
+   ```
+
+   前端位于 `http://localhost:5173`。Vite 支持前端热更新，并将 `/api` 请求代理到本地后端的 `8080` 端口。
 
 ## 本地存储
 
-对象存储默认使用 [SeaweedFS](https://github.com/seaweedfs/seaweedfs) 4.48 的单机 `mini` 模式，提供 S3 接口。也可自行接入其它 S3 兼容对象存储。
+对象存储默认使用 [SeaweedFS](https://github.com/seaweedfs/seaweedfs) ，也可自行接入其它 S3 兼容对象存储。
 
 持久化数据：
 
 | 本地目录 | 用途 |
 | --- | --- |
 | `./data/postgres` | PostgreSQL 16 数据 |
-| `./data/seaweedfs` | SeaweedFS 对象和元数据，备份时必须保存整个目录 |
+| `./data/seaweedfs` | SeaweedFS 对象和元数据 |
 | `./models` | 嵌入模型缓存 |
 
 ## 嵌入模型（jina-embeddings-v5-omni）
@@ -51,7 +106,7 @@
 - Random页一直向下刷可以刷到重复的，这是有意为之。所以如果你的数据很少，Random页会经常出现重复的
   - 但是组图做过处理，你刷不到相同的一组图
 
-## 待办
+## 路线图
 
 ### 马上就做
 - [ ] 统一配色
