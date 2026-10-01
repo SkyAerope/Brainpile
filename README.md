@@ -3,6 +3,18 @@
 > [!WARNING]
 > 该项目还在积极开发中，目前以增加新功能为重心。部署指南稍后推出。
 
+## 本地存储
+
+对象存储默认使用 [SeaweedFS](https://github.com/seaweedfs/seaweedfs) 4.48 的单机 `mini` 模式，提供 S3 接口。也可自行接入其它 S3 兼容对象存储。
+
+持久化数据：
+
+| 本地目录 | 用途 |
+| --- | --- |
+| `./data/postgres` | PostgreSQL 16 数据 |
+| `./data/seaweedfs` | SeaweedFS 对象和元数据，备份时必须保存整个目录 |
+| `./models` | 嵌入模型缓存 |
+
 ## 嵌入模型（jina-embeddings-v5-omni）
 
 语义检索使用 [jina-embeddings-v5-omni-nano-retrieval](https://huggingface.co/Yirasumi/jina-embeddings-v5-omni-nano-retrieval-GGUF)（GGUF 量化版），通过 `brainpile-jina` 服务以 jina fork 的 llama.cpp（`feat-v5-omni` 分支）运行。文本与图片被映射到**同一个 768 维向量空间**，因此文搜图、以图搜图都走同一路向量召回。

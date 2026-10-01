@@ -5,10 +5,10 @@ services:
       - "8080:8080"
     environment:
       - DATABASE_URL=postgres://brainpile:brainpile@postgres:5432/brainpile
-      - S3_ENDPOINT=http://minio:9000
-      - S3_PUBLIC_ENDPOINT=http://127.0.0.1:9000
-      - S3_ACCESS_KEY=minioadmin
-      - S3_SECRET_KEY=minioadmin
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_PUBLIC_ENDPOINT=http://127.0.0.1:8333
+      - S3_ACCESS_KEY=brainpile-admin
+      - S3_SECRET_KEY=brainpile-admin
       - EMBEDDING_API_URL=http://brainpile-jina:8000
       - VLM_API_BASE=${VLM_API_BASE}
       - VLM_API_KEY=${VLM_API_KEY}
@@ -17,7 +17,7 @@ services:
       - RUST_LOG=info
     depends_on:
       - postgres
-      - minio
+      - seaweedfs
       - brainpile-jina
     restart: unless-stopped
 
@@ -45,24 +45,20 @@ services:
       - POSTGRES_PASSWORD=brainpile
       - POSTGRES_DB=brainpile
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     restart: unless-stopped
 
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    command: mini -dir=/data -ip=seaweedfs -ip.bind=0.0.0.0 -webdav=false -admin.ui=false
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "8333:8333"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - AWS_ACCESS_KEY_ID=brainpile-admin
+      - AWS_SECRET_ACCESS_KEY=brainpile-admin
+      - S3_BUCKET=brainpile
     volumes:
-      - minio_data:/data
+      - ./data/seaweedfs:/data
     restart: unless-stopped
-
-volumes:
-  postgres_data:
-  minio_data:
